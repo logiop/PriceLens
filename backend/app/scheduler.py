@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 
 from .collector import collect_round
 from .database import engine
-from .models import User
+from .models import Team
 
 INTERVAL_SECONDS = int(os.environ.get("PRICELENS_COLLECT_INTERVAL_SECONDS", "300"))
 ENABLED = os.environ.get("PRICELENS_SCHEDULER_ENABLED", "1").lower() not in ("0", "false", "no")
@@ -26,13 +26,13 @@ class SchedulerState:
 state = SchedulerState()
 
 
-def _collect_all_users() -> dict:
-    """Run one collection round for every user (blocking; called in a thread)."""
+def _collect_all_teams() -> dict:
+    """Run one collection round for every team (blocking; called in a thread)."""
     with Session(engine) as session:
-        users = session.exec(select(User)).all()
+        teams = session.exec(select(Team)).all()
         totals = {"collected": 0, "alerts_created": 0, "skipped": 0, "errors": 0}
-        for user in users:
-            result = collect_round(session, user_id=user.id)
+        for team in teams:
+            result = collect_round(session, team_id=team.id)
             totals["collected"] += result.collected
             totals["alerts_created"] += result.alerts_created
             totals["skipped"] += result.skipped
@@ -46,7 +46,7 @@ async def _loop() -> None:
         state.running = True
         state.last_run = datetime.now(timezone.utc)
         try:
-            state.last_result = await asyncio.to_thread(_collect_all_users)
+            state.last_result = await asyncio.to_thread(_collect_all_teams)
             state.last_error = None
         except Exception as exc:  # noqa: BLE001 - keep the loop alive on any error
             state.last_error = str(exc)

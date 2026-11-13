@@ -1,5 +1,6 @@
 import type {
   Alert,
+  AuditEntry,
   Competitor,
   DashboardData,
   HistorySeries,
@@ -8,22 +9,27 @@ import type {
   RepricingPreview,
   RepricingRecommendation,
   SchedulerStatus,
+  Team,
+  TeamMember,
   TokenResponse,
   User,
 } from "../types";
-import { clearToken, getToken } from "./auth";
+import { clearTeamId, clearToken, getTeamId, getToken } from "./auth";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
+  const teamId = getTeamId();
   const res = await fetch(path, {
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(teamId ? { "X-Team-Id": teamId } : {}),
     },
     ...init,
   });
   if (res.status === 401) {
     clearToken();
+    clearTeamId();
     window.dispatchEvent(new Event("pricelens:unauthorized"));
     throw new Error("Sessione scaduta");
   }
@@ -56,6 +62,22 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   me: () => request<User>("/api/auth/me"),
+
+  // teams
+  teams: () => request<Team[]>("/api/teams"),
+  createTeam: (name: string) =>
+    request<Team>("/api/teams", { method: "POST", body: JSON.stringify({ name }) }),
+  teamMembers: (teamId: number) => request<TeamMember[]>(`/api/teams/${teamId}/members`),
+  addTeamMember: (teamId: number, email: string, role: "admin" | "member" = "member") =>
+    request<TeamMember>(`/api/teams/${teamId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ email, role }),
+    }),
+  removeTeamMember: (teamId: number, userId: number) =>
+    request<void>(`/api/teams/${teamId}/members/${userId}`, { method: "DELETE" }),
+
+  // audit
+  audit: (limit = 100) => request<AuditEntry[]>(`/api/audit?limit=${limit}`),
 
   dashboard: () => request<DashboardData>("/api/dashboard"),
 

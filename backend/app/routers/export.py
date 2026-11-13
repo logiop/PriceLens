@@ -13,7 +13,7 @@ from ..analytics import market_stats
 from ..database import SessionDep
 from ..models import Alert, Competitor, PricePoint, Product
 from ..models import utcnow
-from ..security import CurrentUserDep
+from ..security import CurrentTeamDep
 
 router = APIRouter(prefix="/export", tags=["export"])
 
@@ -54,12 +54,12 @@ def _xlsx(headers: list[str], rows: list[list], filename: str) -> Response:
 
 @router.get("/products")
 def export_products(
-    user: CurrentUserDep,
+    team: CurrentTeamDep,
     session: SessionDep,
     format: str = Query(default="csv", pattern="^(csv|xlsx)$"),
 ):
     products = session.exec(
-        select(Product).where(Product.user_id == user.id).order_by(Product.name)
+        select(Product).where(Product.team_id == team.id).order_by(Product.name)
     ).all()
     headers = [
         "sku", "nome", "brand", "categoria", "ean", "costo", "prezzo", "msrp", "map",
@@ -83,15 +83,15 @@ def export_products(
 
 @router.get("/alerts")
 def export_alerts(
-    user: CurrentUserDep,
+    team: CurrentTeamDep,
     session: SessionDep,
     format: str = Query(default="csv", pattern="^(csv|xlsx)$"),
 ):
     alerts = session.exec(
-        select(Alert).where(Alert.user_id == user.id).order_by(Alert.created_at.desc())
+        select(Alert).where(Alert.team_id == team.id).order_by(Alert.created_at.desc())
     ).all()
-    products = {p.id: p for p in session.exec(select(Product).where(Product.user_id == user.id)).all()}
-    competitors = {c.id: c for c in session.exec(select(Competitor).where(Competitor.user_id == user.id)).all()}
+    products = {p.id: p for p in session.exec(select(Product).where(Product.team_id == team.id)).all()}
+    competitors = {c.id: c for c in session.exec(select(Competitor).where(Competitor.team_id == team.id)).all()}
 
     headers = ["data", "tipo", "severita", "letto", "prodotto", "competitor", "messaggio"]
     rows: list[list] = []
@@ -113,13 +113,13 @@ def export_alerts(
 @router.get("/history/{product_id}")
 def export_history(
     product_id: int,
-    user: CurrentUserDep,
+    team: CurrentTeamDep,
     session: SessionDep,
     format: str = Query(default="csv", pattern="^(csv|xlsx)$"),
     days: int = Query(default=60, ge=1, le=365),
 ):
     product = session.get(Product, product_id)
-    if product is None or product.user_id != user.id:
+    if product is None or product.team_id != team.id:
         raise HTTPException(status_code=404, detail="Prodotto non trovato")
 
     cutoff = utcnow() - timedelta(days=days)
@@ -132,7 +132,7 @@ def export_history(
         .order_by(PricePoint.captured_at)
     ).all()
     competitors = {
-        c.id: c for c in session.exec(select(Competitor).where(Competitor.user_id == user.id)).all()
+        c.id: c for c in session.exec(select(Competitor).where(Competitor.team_id == team.id)).all()
     }
 
     headers = ["data", "competitor", "prezzo", "disponibilita"]

@@ -13,7 +13,7 @@ def utcnow() -> datetime:
 
 
 class User(SQLModel, table=True):
-    """An account that owns products, competitors and their data."""
+    """An account that can belong to one or more teams."""
 
     id: int | None = Field(default=None, primary_key=True)
     email: str = Field(index=True, unique=True)
@@ -21,13 +21,33 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class Team(SQLModel, table=True):
+    """A workspace. Products and competitors belong to a team, not a user."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class TeamMember(SQLModel, table=True):
+    """Membership of a user in a team, with a role."""
+
+    __table_args__ = (UniqueConstraint("team_id", "user_id", name="uq_teammember_team_user"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    team_id: int = Field(foreign_key="team.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    role: str = "member"  # owner | admin | member
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Product(SQLModel, table=True):
     """A product you sell and monitor against competitors."""
 
-    __table_args__ = (UniqueConstraint("user_id", "sku", name="uq_product_user_sku"),)
+    __table_args__ = (UniqueConstraint("team_id", "sku", name="uq_product_team_sku"),)
 
     id: int | None = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.id", index=True)
+    team_id: int = Field(foreign_key="team.id", index=True)
     sku: str = Field(index=True)
     name: str
     brand: str
@@ -50,7 +70,7 @@ class Competitor(SQLModel, table=True):
     """A competitor retailer/marketplace whose prices we track."""
 
     id: int | None = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.id", index=True)
+    team_id: int = Field(foreign_key="team.id", index=True)
     name: str
     domain: str
     type: str = "retailer"  # marketplace | retailer
@@ -69,7 +89,7 @@ class PricePoint(SQLModel, table=True):
     )
 
     id: int | None = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.id", index=True)
+    team_id: int = Field(foreign_key="team.id", index=True)
     product_id: int = Field(foreign_key="product.id", index=True)
     competitor_id: int = Field(foreign_key="competitor.id", index=True)
     price: float | None = None
@@ -83,11 +103,25 @@ class Alert(SQLModel, table=True):
     """A pricing event worth surfacing to the user."""
 
     id: int | None = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.id", index=True)
+    team_id: int = Field(foreign_key="team.id", index=True)
     product_id: int = Field(foreign_key="product.id", index=True)
     competitor_id: int | None = Field(default=None, foreign_key="competitor.id", index=True)
     type: str
     severity: str = "info"  # critical | warning | info
     message: str
     read: bool = False
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class AuditLog(SQLModel, table=True):
+    """Append-only record of relevant actions performed on a team."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    team_id: int = Field(foreign_key="team.id", index=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
+    action: str
+    entity: str | None = None
+    entity_id: int | None = None
+    detail: str | None = None
+    ip: str | None = None
     created_at: datetime = Field(default_factory=utcnow, index=True)

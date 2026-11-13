@@ -8,7 +8,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session
 
 from .database import engine, init_db
-from .routers import alerts, auth, competitors, dashboard, export, products, repricing, system
+from .rate_limit import RateLimitMiddleware
+from .routers import (
+    alerts,
+    audit,
+    auth,
+    competitors,
+    dashboard,
+    export,
+    products,
+    repricing,
+    system,
+    teams,
+)
 from .scheduler import start_scheduler, stop_scheduler
 from .seed import seed_demo
 
@@ -28,10 +40,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="PriceLens",
     description="Competitive pricing intelligence — clone migliorato di Minderest.",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"],
@@ -53,6 +66,8 @@ async def security_headers(request, call_next):
 
 for router in (
     auth.router,
+    teams.router,
+    audit.router,
     products.router,
     competitors.router,
     alerts.router,

@@ -1,5 +1,32 @@
 export type Strategy = "match_min" | "undercut" | "margin_protected" | "premium";
 
+export interface Team {
+  id: number;
+  name: string;
+  role: "owner" | "admin" | "member";
+  member_count: number;
+  created_at: string;
+}
+
+export interface TeamMember {
+  user_id: number;
+  email: string;
+  role: "owner" | "admin" | "member";
+  created_at: string;
+}
+
+export interface AuditEntry {
+  id: number;
+  user_id: number | null;
+  action: string;
+  entity: string | null;
+  entity_id: number | null;
+  detail: string | null;
+  ip: string | null;
+  created_at: string;
+  user_email: string | null;
+}
+
 export interface Product {
   id: number;
   sku: string;

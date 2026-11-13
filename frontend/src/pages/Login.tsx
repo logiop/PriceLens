@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { api } from "../lib/api";
-import { setToken } from "../lib/auth";
+import { clearTeamId, setToken } from "../lib/auth";
 
 export function Login({ onAuth }: { onAuth: () => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -20,6 +20,7 @@ export function Login({ onAuth }: { onAuth: () => void }) {
           ? await api.login(email, password)
           : await api.register(email, password);
       setToken(res.access_token);
+      clearTeamId();
       onAuth();
     } catch (err) {
       setError((err as Error).message);

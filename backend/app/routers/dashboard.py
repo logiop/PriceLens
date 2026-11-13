@@ -8,24 +8,24 @@ from ..database import SessionDep
 from ..models import Alert, Competitor, PricePoint, Product
 from ..models import utcnow
 from ..routers.alerts import _to_read
-from ..security import CurrentUserDep
+from ..security import CurrentTeamDep
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 @router.get("")
 def dashboard(
-    user: CurrentUserDep,
+    team: CurrentTeamDep,
     session: SessionDep,
     recent_alerts: int = Query(default=6, ge=1, le=50),
 ):
     products = session.exec(
-        select(Product).where(Product.user_id == user.id, Product.active.is_(True))
+        select(Product).where(Product.team_id == team.id, Product.active.is_(True))
     ).all()
     competitors = session.exec(
-        select(Competitor).where(Competitor.user_id == user.id, Competitor.active.is_(True))
+        select(Competitor).where(Competitor.team_id == team.id, Competitor.active.is_(True))
     ).all()
-    alerts = session.exec(select(Alert).where(Alert.user_id == user.id)).all()
+    alerts = session.exec(select(Alert).where(Alert.team_id == team.id)).all()
 
     open_alerts = [a for a in alerts if not a.read]
     critical = [a for a in open_alerts if a.severity == "critical"]
@@ -34,7 +34,7 @@ def dashboard(
     points_today = len(
         session.exec(
             select(PricePoint).where(
-                PricePoint.user_id == user.id, PricePoint.captured_at >= today_start
+                PricePoint.team_id == team.id, PricePoint.captured_at >= today_start
             )
         ).all()
     )
@@ -66,7 +66,7 @@ def dashboard(
     ]
 
     recent = session.exec(
-        select(Alert).where(Alert.user_id == user.id).order_by(Alert.created_at.desc()).limit(recent_alerts)
+        select(Alert).where(Alert.team_id == team.id).order_by(Alert.created_at.desc()).limit(recent_alerts)
     ).all()
 
     return {

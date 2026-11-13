@@ -35,6 +35,46 @@ class TokenResponse(BaseModel):
     user: UserRead
 
 
+# ------------------------------------------------------------------ Teams
+class TeamCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class TeamRead(BaseModel):
+    id: int
+    name: str
+    role: str
+    member_count: int = 0
+    created_at: datetime
+
+
+class TeamMemberCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=254, pattern=EMAIL_RE)
+    role: Literal["admin", "member"] = "member"
+
+
+class TeamMemberRead(BaseModel):
+    user_id: int
+    email: str
+    role: str
+    created_at: datetime
+
+
+# ------------------------------------------------------------------ Audit
+class AuditLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int | None
+    action: str
+    entity: str | None
+    entity_id: int | None
+    detail: str | None
+    ip: str | None
+    created_at: datetime
+    user_email: str | None = None
+
+
 # ---------------------------------------------------------------- Products
 class ProductBase(BaseModel):
     sku: str = Field(min_length=1, max_length=64)

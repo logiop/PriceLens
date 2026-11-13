@@ -6,12 +6,14 @@ from datetime import timedelta
 from sqlmodel import Session, select
 
 from .collector import collect_round
-from .models import Alert, Competitor, PricePoint, Product, User
+from .models import Alert, Competitor, PricePoint, Product, Team, TeamMember, User
 from .models import utcnow
 from .security import hash_password
 
 DEMO_EMAIL = "demo@pricelens.it"
 DEMO_PASSWORD = "demo1234"
+DEMO_TEAM = "PriceLens HQ"
+DEMO_COLLEAGUE = "collega@pricelens.it"
 
 COMPETITORS = [
     {"name": "Amazon", "domain": "amazon.it", "type": "marketplace", "base_ratio": 0.96, "volatility": 0.015, "promo_prob": 0.10, "stockout_prob": 0.01},
@@ -58,7 +60,7 @@ def _simulate_series(base: float, volatility: float, promo_prob: float, n: int) 
 
 
 def seed_demo(session: Session) -> dict:
-    """Populate the database with a demo user, products, competitors and history (idempotent)."""
+    """Populate the database with a demo team, products, competitors and history (idempotent)."""
     existing = session.exec(select(User).limit(1)).first()
     if existing is not None:
         return {"seeded": False, "reason": "database already populated"}
@@ -66,9 +68,20 @@ def seed_demo(session: Session) -> dict:
     random.seed(42)
 
     demo_user = User(email=DEMO_EMAIL, password_hash=hash_password(DEMO_PASSWORD))
+    colleague = User(email=DEMO_COLLEAGUE, password_hash=hash_password(DEMO_PASSWORD))
     session.add(demo_user)
+    session.add(colleague)
     session.commit()
     session.refresh(demo_user)
+    session.refresh(colleague)
+
+    team = Team(name=DEMO_TEAM)
+    session.add(team)
+    session.commit()
+    session.refresh(team)
+    session.add(TeamMember(team_id=team.id, user_id=demo_user.id, role="owner"))
+    session.add(TeamMember(team_id=team.id, user_id=colleague.id, role="member"))
+    session.commit()
 
     competitors: list[Competitor] = []
     for item in COMPETITORS:
@@ -79,7 +92,7 @@ def seed_demo(session: Session) -> dict:
             "stockout_prob": item["stockout_prob"],
         }
         competitor = Competitor(
-            user_id=demo_user.id,
+            team_id=team.id,
             name=item["name"],
             domain=item["domain"],
             type=item["type"],
@@ -93,7 +106,7 @@ def seed_demo(session: Session) -> dict:
     products: list[Product] = []
     for item in PRODUCTS:
         product = Product(
-            user_id=demo_user.id,
+            team_id=team.id,
             sku=item["sku"],
             name=item["name"],
             brand=item["brand"],
@@ -128,7 +141,7 @@ def seed_demo(session: Session) -> dict:
                 stock = "in_stock" if price is not None else "out_of_stock"
                 session.add(
                     PricePoint(
-                        user_id=demo_user.id,
+                        team_id=team.id,
                         product_id=product.id,
                         competitor_id=competitor.id,
                         price=price,
@@ -141,7 +154,7 @@ def seed_demo(session: Session) -> dict:
     session.commit()
 
     # One fresh round to add "today" observations and realistic alerts
-    collect_round(session, user_id=demo_user.id)
+    collect_round(session, team_id=team.id)
 
     # Mark some alerts as already read for a realistic mix
     alerts = session.exec(select(Alert)).all()
@@ -152,8 +165,10 @@ def seed_demo(session: Session) -> dict:
 
     return {
         "seeded": True,
+        "team": DEMO_TEAM,
         "products": len(products),
         "competitors": len(competitors),
         "demo_email": DEMO_EMAIL,
         "demo_password": DEMO_PASSWORD,
+        "colleague_email": DEMO_COLLEAGUE,
     }

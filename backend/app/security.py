@@ -4,23 +4,67 @@ import hashlib
 import hmac
 import os
 import secrets
+import warnings
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlmodel import select
 
 from .database import SessionDep
-from .models import User
+from .models import Team, TeamMember, User
 
-SECRET_KEY = os.environ.get("PRICELENS_SECRET_KEY") or secrets.token_hex(32)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("PRICELENS_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 days
 
 _PBKDF2_ITERATIONS = 600_000
 
 _bearer = HTTPBearer(auto_error=False)
+
+
+def _load_or_create_secret() -> str:
+    """Resolve the JWT signing key.
+
+    Priority: env var → persisted key file → newly generated (and persisted) key.
+    Persisting the key keeps sessions valid across restarts and lets several
+    workers share the same signing key.
+    """
+    env_key = os.environ.get("PRICELENS_SECRET_KEY")
+    if env_key:
+        return env_key
+
+    key_path = Path(
+        os.environ.get(
+            "PRICELENS_SECRET_KEY_FILE",
+            Path(__file__).resolve().parent.parent / ".secret_key",
+        )
+    )
+    try:
+        if key_path.exists():
+            stored = key_path.read_text(encoding="utf-8").strip()
+            if stored:
+                return stored
+        new_key = secrets.token_hex(32)
+        key_path.write_text(new_key + "\n", encoding="utf-8")
+        try:
+            os.chmod(key_path, 0o600)
+        except OSError:
+            pass
+        return new_key
+    except OSError as exc:  # read-only FS, permissions, sandbox…
+        warnings.warn(
+            f"Impossibile persistere la chiave JWT in {key_path} ({exc}); "
+            "verrà usata una chiave effimera e le sessioni decadranno al riavvio. "
+            "Imposta PRICELENS_SECRET_KEY in produzione.",
+            RuntimeWarning,
+        )
+        return secrets.token_hex(32)
+
+
+SECRET_KEY = _load_or_create_secret()
 
 
 def hash_password(password: str) -> str:
@@ -85,3 +129,35 @@ def get_current_user(
 
 
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
+
+
+def get_current_team(
+    user: CurrentUserDep,
+    session: SessionDep,
+    x_team_id: Annotated[int | None, Header(alias="X-Team-Id")] = None,
+) -> Team:
+    """Resolve the active team: explicit X-Team-Id header or the user's first team."""
+    if x_team_id is not None:
+        membership = session.exec(
+            select(TeamMember).where(
+                TeamMember.team_id == x_team_id,
+                TeamMember.user_id == user.id,
+            )
+        ).first()
+        team = session.get(Team, x_team_id)
+        if membership is None or team is None:
+            raise HTTPException(status_code=403, detail="Non appartieni a questo team")
+        return team
+
+    membership = session.exec(
+        select(TeamMember).where(TeamMember.user_id == user.id).order_by(TeamMember.id)
+    ).first()
+    if membership is None:
+        raise HTTPException(status_code=400, detail="Nessun team associato all'utente")
+    team = session.get(Team, membership.team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail="Team non trovato")
+    return team
+
+
+CurrentTeamDep = Annotated[Team, Depends(get_current_team)]

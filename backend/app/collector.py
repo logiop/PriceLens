@@ -184,7 +184,7 @@ def _add_alert(
 ) -> None:
     session.add(
         Alert(
-            user_id=product.user_id,
+            team_id=product.team_id,
             product_id=product.id,
             competitor_id=competitor.id,
             type=type_,
@@ -272,16 +272,16 @@ def _detect_alerts(
     return created
 
 
-def collect_round(session: Session, user_id: int | None = None) -> CollectResult:
+def collect_round(session: Session, team_id: int | None = None) -> CollectResult:
     """Run one collection round across active products and competitors.
 
-    When `user_id` is given, only that user's products and competitors are collected.
+    When `team_id` is given, only that team's products and competitors are collected.
     """
     product_query = select(Product).where(Product.active.is_(True))
     competitor_query = select(Competitor).where(Competitor.active.is_(True))
-    if user_id is not None:
-        product_query = product_query.where(Product.user_id == user_id)
-        competitor_query = competitor_query.where(Competitor.user_id == user_id)
+    if team_id is not None:
+        product_query = product_query.where(Product.team_id == team_id)
+        competitor_query = competitor_query.where(Competitor.team_id == team_id)
     products = session.exec(product_query).all()
     competitors = session.exec(competitor_query).all()
 
@@ -307,7 +307,7 @@ def collect_round(session: Session, user_id: int | None = None) -> CollectResult
 
             session.add(
                 PricePoint(
-                    user_id=product.user_id,
+                    team_id=product.team_id,
                     product_id=product.id,
                     competitor_id=competitor.id,
                     price=new_price,

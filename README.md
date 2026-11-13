@@ -23,7 +23,10 @@ marketplace, e non si limita a mostrare dati: **suggerisce il prezzo da applicar
 
 | Area | Funzionalità |
 | --- | --- |
-| **Multi-utente** | Registrazione/login con JWT (PBKDF2 + token firmati), dati isolati per account. |
+| **Multi-utente** | Registrazione/login con JWT (PBKDF2 + token firmati). |
+| **Team / workspace** | Più utenti condividono lo stesso workspace, con ruoli **owner/admin/member** e switcher team. |
+| **Audit log** | Registro append-only delle azioni per team (chi, cosa, quando, IP). |
+| **Rate limiting** | Limite per IP su auth (10/min) e API (300/min), configurabile. |
 | **Monitoraggio** | Catalogo prodotti (SKU, costo, prezzo, MSRP, MAP), competitor multipli, storico prezzi. |
 | **Analisi** | Min/max/medio dei competitor, **posizione** (1° = più economico) e **indice di competitività 0–100**. |
 | **Repricing** | Motore con 4 strategie (`allinea al minimo`, `sottoquotazione`, `margine protetto`, `premium`), floor di margine e ceiling MSRP, applicazione one-click. |
@@ -64,9 +67,14 @@ Al primo avvio il database viene popolato con dati demo:
 ```
 Email:    demo@pricelens.it
 Password: demo1234
+Team:     PriceLens HQ (owner)
+
+Collega (stesso team, ruolo member):
+Email:    collega@pricelens.it
+Password: demo1234
 ```
 
-12 prodotti, 6 competitor, 60 giorni di storico prezzi e alert realistici.
+12 prodotti, 6 competitor, 60 giorni di storico prezzi e alert realistici, condivisi dal team.
 
 > ⚠️ **iCloud Drive.** Se il progetto vive dentro una cartella sincronizzata con
 > iCloud Drive (es. `~/Documents`), macOS può "scaricare" i file del virtualenv su iCloud e
@@ -93,10 +101,14 @@ Variabili d'ambiente principali:
 | Variabile | Default | Descrizione |
 | --- | --- | --- |
 | `PRICELENS_DATABASE_URL` | `sqlite:///./pricelens.db` | URL database (SQLite o SQLAlchemy). |
-| `PRICELENS_SECRET_KEY` | random | Chiave firma JWT (impostala in produzione). |
+| `PRICELENS_SECRET_KEY` | persistita su file | Chiave firma JWT. Se assente viene letta/creata `backend/.secret_key` (permessi 0600): le sessioni sopravvivono ai riavvii e più worker condividono la stessa chiave. |
+| `PRICELENS_SECRET_KEY_FILE` | `backend/.secret_key` | Dove persistere la chiave quando `PRICELENS_SECRET_KEY` non è impostata. |
 | `PRICELENS_TOKEN_EXPIRE_MINUTES` | `10080` | Durata token (7 giorni). |
 | `PRICELENS_COLLECT_INTERVAL_SECONDS` | `300` | Intervallo raccolta automatica. |
 | `PRICELENS_SCHEDULER_ENABLED` | `1` | `0` per disattivare lo scheduler. |
+| `PRICELENS_RATE_LIMIT_ENABLED` | `1` | `0` per disattivare il rate limiting. |
+| `PRICELENS_RATE_LIMIT_PER_MINUTE` | `300` | Limite API per IP al minuto. |
+| `PRICELENS_AUTH_RATE_LIMIT_PER_MINUTE` | `10` | Limite auth per IP al minuto. |
 
 ---
 
@@ -105,6 +117,10 @@ Variabili d'ambiente principali:
 ```
 POST /api/auth/register · /api/auth/login      Autenticazione
 GET  /api/auth/me
+
+GET  /api/teams · POST /api/teams              Team dell'utente / crea team
+GET  /api/teams/{id}/members                   Membri (POST invito, DELETE rimozione)
+GET  /api/audit?limit=100                      Registro attività del team
 
 GET  /api/dashboard                            KPI + movers + distribuzione + alert recenti
 GET  /api/products?search=&category=           Catalogo con statistiche calcolate
@@ -159,9 +175,32 @@ Per ogni prodotto, PriceLens calcola:
 make test
 ```
 
-La suite (20 test) copre: health, autenticazione (login/register/401), isolamento tra
-utenti, dashboard, catalogo, dettaglio prodotto, storico, competitor, alert, repricing
-(preview + apply), raccolta prezzi, export CSV/Excel e stato dello scheduler.
+Due suite:
+
+- **Backend — 36 test** (`make test`): auth, team e isolamento, dashboard, CRUD prodotti e
+  competitor, repricing, alert, export CSV/Excel, raccolta prezzi, rate limiter, audit log,
+  parsing prezzi (JSON-LD/regex/importi) e hashing password.
+- **Frontend — 16 test** (`cd frontend && npm test`, Vitest + Testing Library):
+  formattazione valute/percentuali, storage token/team, componenti (`Badge`, `PriceDelta`).
+
+## CI e qualità
+
+Il workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) esegue su ogni push/PR:
+
+- **backend**: `pip install -r backend/requirements.txt` + `pytest`;
+- **frontend**: `npm ci`, `typecheck`, `build`, `npm test`.
+
+## Database: SQLite e Postgres
+
+SQLite è il default (zero configurazione). Per un utilizzo in team su più istanze/worker si
+può passare a **Postgres**:
+
+```bash
+pip install -r backend/requirements-postgres.txt
+docker compose up -d                     # Postgres 16 su :5432
+export PRICELENS_DATABASE_URL=postgresql+psycopg://pricelens:pricelens@localhost:5432/pricelens
+make serve
+```
 
 ---
 

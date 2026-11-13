@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 backend/.venv/
 backend/pricelens.db
+backend/.secret_key
+.secret_key
 .pytest_cache/
 .coverage
 

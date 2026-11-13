@@ -87,36 +87,42 @@ il frontend compilato) e un frontend **React/TypeScript** (SPA). Il database è 
 
 # 3. Modello dati
 
-Cinque entità, tutte legate all'utente tramite `user_id` (multi-tenancy a livello di riga).
+Le entità principali sono legate al **team** tramite `team_id` (multi-tenancy a livello di riga).
 
 ```
-User 1───N Product 1───N PricePoint N───1 Competitor
-               │
-               └──────N Alert
+User 1───N TeamMember N───1 Team
+                             │
+          ┌──────────────────┼──────────────────┬─────────────┐
+          │                  │                  │             │
+      Product 1─N PricePoint N─1 Competitor   Alert      AuditLog
 ```
 
 ## Entità
 
 | Entità | Campi principali | Ruolo |
 | --- | --- | --- |
-| **User** | id, email (unique), password_hash | Account proprietario dei dati |
-| **Product** | sku, name, brand, category, cost_price, current_price, msrp, map_price, strategy, min_margin_pct | Il prodotto che vendi |
-| **Competitor** | name, domain, type, price_source_type, price_source_config | Chi monitori |
-| **PricePoint** | product_id, competitor_id, price, stock_status, captured_at | Una rilevazione di prezzo nel tempo |
-| **Alert** | product_id, competitor_id, type, severity, message, read | Evento da leggere |
+| **User** | id, email (unique), password_hash | Account di accesso |
+| **Team** | id, name | Workspace che possiede i dati |
+| **TeamMember** | team_id, user_id, role | Appartenenza con ruolo **owner/admin/member** |
+| **Product** | team_id, sku, name, brand, category, cost_price, current_price, msrp, map_price, strategy, min_margin_pct | Il prodotto che vendi |
+| **Competitor** | team_id, name, domain, type, price_source_type, price_source_config | Chi monitori |
+| **PricePoint** | team_id, product_id, competitor_id, price, stock_status, captured_at | Una rilevazione di prezzo nel tempo |
+| **Alert** | team_id, product_id, competitor_id, type, severity, message, read | Evento da leggere |
+| **AuditLog** | team_id, user_id, action, entity, entity_id, detail, ip | Registro append-only delle azioni |
 
 ## Vincoli e indici
 
-- `UniqueConstraint(user_id, sku)` — lo SKU è unico **per utente**.
+- `UniqueConstraint(team_id, sku)` — lo SKU è unico **per team**.
+- `UniqueConstraint(team_id, user_id)` su `TeamMember` — un utente entra una volta sola.
 - Indice composito `(product_id, competitor_id, captured_at)` sui `PricePoint`:
   rende veloce l'ultimo prezzo per competitor.
 - Indice su `captured_at` per le query "di oggi" della dashboard.
 
-## Perché `user_id` anche su PricePoint e Alert
+## Perché `team_id` anche su PricePoint e Alert
 
 Anche se tecnicamente derivabili dal prodotto, tenerli denormalizzati permette di
-filtrare con una sola condizione (`WHERE user_id = ?`) le query più frequenti
-(conteggio alert, punti di oggi) senza join.
+filtrare con una sola condizione (`WHERE team_id = ?`) le query più frequenti
+(conteggio alert, punti di oggi) senza join — e con un solo indice.
 
 \newpage
 
@@ -140,22 +146,26 @@ hash = f"pbkdf2_sha256$600000${salt}${dk.hex()}"
 
 Il confronto usa `hmac.compare_digest` (tempo costante, niente timing attack).
 
-## Token
+## Token e chiave di firma
 
 - **JWT HS256**, payload `{sub, iat, exp}`.
 - Scadenza di default **7 giorni** (`PRICELENS_TOKEN_EXPIRE_MINUTES`).
-- Chiave `PRICELENS_SECRET_KEY`; se assente ne viene generata una casuale all'avvio
-  (in produzione va impostata fissa).
+- La chiave viene da `PRICELENS_SECRET_KEY`; se assente viene **persistita** in
+  `backend/.secret_key` (permessi `0600`) e riusata ai riavvii. Così le sessioni non
+  decadono ad ogni restart e più worker condividono la stessa chiave.
+- In produzione si può impostare `PRICELENS_SECRET_KEY` da un secret manager.
 
-## Isolamento tra utenti
+## Team e isolamento
 
-Ogni endpoint applicativo ha la dipendenza `CurrentUserDep`. Le query includono sempre
-`WHERE user_id = <utente>`. Le letture per ID verificano la proprietà:
+Ogni utente appartiene a uno o più **team**. Il team attivo si sceglie con l'header
+`X-Team-Id` (se assente, si usa il primo team dell'utente). Ogni endpoint applicativo ha
+la dipendenza `CurrentTeamDep` e le query includono `WHERE team_id = <team>`.
+Le letture per ID verificano la proprietà:
 
 ```python
-def _get_owned(session, user_id, product_id) -> Product:
+def _get_owned(session, team_id, product_id) -> Product:
     product = session.get(Product, product_id)
-    if product is None or product.user_id != user_id:
+    if product is None or product.team_id != team_id:
         raise HTTPException(404, "Prodotto non trovato")
     return product
 ```
@@ -168,7 +178,7 @@ Restituire **404** (invece di 403) evita di rivelare l'esistenza di risorse altr
 # 5. Il ciclo del prezzo: la raccolta
 
 Il `collector` è il cuore pulsante. Ad ogni "giro" crea un `PricePoint` per ogni
-combinazione **prodotto attivo × competitor attivo** dell'utente.
+combinazione **prodotto attivo × competitor attivo** del team.
 
 ## Fonte simulata (default)
 
@@ -389,7 +399,7 @@ La documentazione interattiva (OpenAPI/Swagger) è su **`/docs`**.
 # 12. Il frontend
 
 SPA React in TypeScript, con routing client-side e un design system minimale
-(Tailwind). Sei schermate:
+(Tailwind). Otto schermate:
 
 | Pagina | Cosa mostra |
 | --- | --- |
@@ -400,6 +410,9 @@ SPA React in TypeScript, con routing client-side e un design system minimale
 | **Repricing** | Tabella delle raccomandazioni con applicazione one-click |
 | **Competitor** | Card con tipo, fonte (simulata/live), prodotti tracciati; creazione |
 | **Alert** | Lista filtrabile, segna-letto, export |
+| **Attività** | Audit log del team: chi ha fatto cosa, quando, da quale IP |
+
+Nella sidebar il **team switcher** cambia il workspace attivo (header `X-Team-Id`).
 
 ## Struttura del codice
 
@@ -430,14 +443,19 @@ frontend/src/
 | --- | --- |
 | Password | PBKDF2-HMAC-SHA256, 600.000 iterazioni, salt casuale per utente |
 | Token | JWT HS256 firmato, scadenza configurabile |
-| Isolamento dati | `WHERE user_id = …` su ogni query; 404 su risorse altrui |
+| Chiave | Persistita in `backend/.secret_key` (0600) se `PRICELENS_SECRET_KEY` manca |
+| Isolamento dati | `WHERE team_id = …` su ogni query; 404 su risorse altrui |
+| Ruoli team | owner/admin/member: solo owner/admin invitano o rimuovono membri |
+| Rate limiting | 10 richieste/min per IP su `/api/auth`, 300/min sulle altre API |
+| Audit log | Registro append-only per team (azione, entità, dettaglio, IP) |
 | Header | `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` |
 | CORS | Solo origini di sviluppo esplicite (`localhost:5173`, `127.0.0.1:5173`, `localhost:3000`) |
 | Input | Validazione Pydantic (email, prezzi > 0, lunghezze, enumerazioni) |
 | Query | ORM parametrizzato (niente SQL concatenato) |
 
-> **Nota.** `PRICELENS_SECRET_KEY` va impostata fissa in produzione: con la chiave
-> casuale i token vengono invalidati ad ogni riavvio.
+> **Nota.** In un deployment multi-istanza imposta `PRICELENS_SECRET_KEY` (o condividi
+> lo stesso `.secret_key`): il rate limiter è in-process, quindi per più worker serve un
+> limiter condiviso (Redis) se vuoi un limite globale.
 
 \newpage
 
@@ -457,32 +475,39 @@ make test      # suite pytest
 Al primo avvio vengono creati il database e i dati demo:
 
 ```
-demo@pricelens.it / demo1234
-12 prodotti · 6 competitor · 60 giorni di storico
+demo@pricelens.it   / demo1234   (owner)
+collega@pricelens.it / demo1234   (member)
+Team: PriceLens HQ · 12 prodotti · 6 competitor · 60 giorni di storico
 ```
 
 ## Variabili d'ambiente
 
 | Variabile | Default | Significato |
 | --- | --- | --- |
-| `PRICELENS_DATABASE_URL` | `sqlite:///./pricelens.db` | Database |
-| `PRICELENS_SECRET_KEY` | casuale | Chiave firma JWT |
+| `PRICELENS_DATABASE_URL` | `sqlite:///./pricelens.db` | Database (SQLite o Postgres) |
+| `PRICELENS_SECRET_KEY` | persistita su file | Chiave firma JWT |
+| `PRICELENS_SECRET_KEY_FILE` | `backend/.secret_key` | File dove persistere la chiave |
 | `PRICELENS_TOKEN_EXPIRE_MINUTES` | `10080` | Durata token |
 | `PRICELENS_COLLECT_INTERVAL_SECONDS` | `300` | Intervallo scheduler |
 | `PRICELENS_SCHEDULER_ENABLED` | `1` | `0` per disattivare |
+| `PRICELENS_RATE_LIMIT_ENABLED` | `1` | `0` per disattivare il rate limiting |
+| `PRICELENS_RATE_LIMIT_PER_MINUTE` | `300` | Limite API per IP al minuto |
+| `PRICELENS_AUTH_RATE_LIMIT_PER_MINUTE` | `10` | Limite auth per IP al minuto |
 
 \newpage
 
 # 15. Test
 
-La suite (`backend/tests`, **20 test**) usa il `TestClient` di FastAPI e un database
-temporaneo isolato, quindi replica il comportamento reale dell'app.
+Due suite, entrambe eseguite in CI.
+
+**Backend** (`backend/tests`, **36 test**) con `TestClient` e database temporaneo:
 
 | Area | Cosa verifica |
 | --- | --- |
 | Health | endpoint pubblico |
 | Auth | login, `/me`, password errata, 401 senza token, registrazione duplicata |
-| Isolamento | un nuovo utente non vede i dati del demo |
+| Team | lista/creazione, invito e rimozione membri, isolamento tra team, ruoli |
+| Isolamento | un nuovo utente non vede i dati altrui |
 | Dashboard | presenza KPI e sezioni |
 | Prodotti | lista, dettaglio, storico, categorie, creazione/eliminazione, SKU duplicato |
 | Competitor | lista e CRUD |
@@ -490,9 +515,16 @@ temporaneo isolato, quindi replica il comportamento reale dell'app.
 | Repricing | preview e applicazione |
 | Raccolta | `POST /api/collect` |
 | Export | CSV e XLSX |
-| Scheduler | endpoint di stato |
+| Audit | registrazione azioni e isolamento tra team |
+| Unit | hashing, parsing importi/JSON-LD/regex, math repricing, rate limiter |
 
-Esecuzione: `make test` → `20 passed`.
+**Frontend** (`frontend/src`, **16 test** con Vitest + Testing Library):
+formattazione valute/percentuali, storage token/team, componenti `Badge` e `PriceDelta`.
+
+```bash
+make test                 # backend → 36 passed
+cd frontend && npm test   # frontend → 16 passed
+```
 
 \newpage
 

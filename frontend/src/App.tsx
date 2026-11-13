@@ -9,7 +9,8 @@ import { ProductDetail } from "./pages/ProductDetail";
 import { Repricing } from "./pages/Repricing";
 import { Competitors } from "./pages/Competitors";
 import { Alerts } from "./pages/Alerts";
-import { clearToken, isAuthed } from "./lib/auth";
+import { Audit } from "./pages/Audit";
+import { clearTeamId, clearToken, isAuthed } from "./lib/auth";
 
 export default function App() {
   const [authed, setAuthed] = useState(isAuthed());
@@ -30,6 +31,7 @@ export default function App() {
                 <Layout
                   onLogout={() => {
                     clearToken();
+                    clearTeamId();
                     setAuthed(false);
                   }}
                 />
@@ -41,6 +43,7 @@ export default function App() {
               <Route path="repricing" element={<Repricing />} />
               <Route path="competitors" element={<Competitors />} />
               <Route path="alerts" element={<Alerts />} />
+              <Route path="audit" element={<Audit />} />
             </Route>
           </Routes>
         ) : (

@@ -191,11 +191,13 @@ dati per <code>user_id</code>.</li>
 <li>Il frontend disegna tabelle, grafici e card.</li>
 </ol>
 <h1 id="modello-dati">3. Modello dati</h1>
-<p>Cinque entità, tutte legate all’utente tramite <code>user_id</code>
-(multi-tenancy a livello di riga).</p>
-<pre><code>User 1───N Product 1───N PricePoint N───1 Competitor
-               │
-               └──────N Alert</code></pre>
+<p>Le entità principali sono legate al <strong>team</strong> tramite
+<code>team_id</code> (multi-tenancy a livello di riga).</p>
+<pre><code>User 1───N TeamMember N───1 Team
+                             │
+          ┌──────────────────┼──────────────────┬─────────────┐
+          │                  │                  │             │
+      Product 1─N PricePoint N─1 Competitor   Alert      AuditLog</code></pre>
 <h2 id="entità">Entità</h2>
 <table>
 <colgroup>
@@ -214,35 +216,55 @@ dati per <code>user_id</code>.</li>
 <tr>
 <td><strong>User</strong></td>
 <td>id, email (unique), password_hash</td>
-<td>Account proprietario dei dati</td>
+<td>Account di accesso</td>
+</tr>
+<tr>
+<td><strong>Team</strong></td>
+<td>id, name</td>
+<td>Workspace che possiede i dati</td>
+</tr>
+<tr>
+<td><strong>TeamMember</strong></td>
+<td>team_id, user_id, role</td>
+<td>Appartenenza con ruolo <strong>owner/admin/member</strong></td>
 </tr>
 <tr>
 <td><strong>Product</strong></td>
-<td>sku, name, brand, category, cost_price, current_price, msrp,
-map_price, strategy, min_margin_pct</td>
+<td>team_id, sku, name, brand, category, cost_price, current_price,
+msrp, map_price, strategy, min_margin_pct</td>
 <td>Il prodotto che vendi</td>
 </tr>
 <tr>
 <td><strong>Competitor</strong></td>
-<td>name, domain, type, price_source_type, price_source_config</td>
+<td>team_id, name, domain, type, price_source_type,
+price_source_config</td>
 <td>Chi monitori</td>
 </tr>
 <tr>
 <td><strong>PricePoint</strong></td>
-<td>product_id, competitor_id, price, stock_status, captured_at</td>
+<td>team_id, product_id, competitor_id, price, stock_status,
+captured_at</td>
 <td>Una rilevazione di prezzo nel tempo</td>
 </tr>
 <tr>
 <td><strong>Alert</strong></td>
-<td>product_id, competitor_id, type, severity, message, read</td>
+<td>team_id, product_id, competitor_id, type, severity, message,
+read</td>
 <td>Evento da leggere</td>
+</tr>
+<tr>
+<td><strong>AuditLog</strong></td>
+<td>team_id, user_id, action, entity, entity_id, detail, ip</td>
+<td>Registro append-only delle azioni</td>
 </tr>
 </tbody>
 </table>
 <h2 id="vincoli-e-indici">Vincoli e indici</h2>
 <ul>
-<li><code>UniqueConstraint(user_id, sku)</code> — lo SKU è unico
-<strong>per utente</strong>.</li>
+<li><code>UniqueConstraint(team_id, sku)</code> — lo SKU è unico
+<strong>per team</strong>.</li>
+<li><code>UniqueConstraint(team_id, user_id)</code> su
+<code>TeamMember</code> — un utente entra una volta sola.</li>
 <li>Indice composito
 <code>(product_id, competitor_id, captured_at)</code> sui
 <code>PricePoint</code>: rende veloce l’ultimo prezzo per
@@ -250,12 +272,12 @@ competitor.</li>
 <li>Indice su <code>captured_at</code> per le query “di oggi” della
 dashboard.</li>
 </ul>
-<h2 id="perché-user_id-anche-su-pricepoint-e-alert">Perché
-<code>user_id</code> anche su PricePoint e Alert</h2>
+<h2 id="perché-team_id-anche-su-pricepoint-e-alert">Perché
+<code>team_id</code> anche su PricePoint e Alert</h2>
 <p>Anche se tecnicamente derivabili dal prodotto, tenerli denormalizzati
 permette di filtrare con una sola condizione
-(<code>WHERE user_id = ?</code>) le query più frequenti (conteggio
-alert, punti di oggi) senza join.</p>
+(<code>WHERE team_id = ?</code>) le query più frequenti (conteggio
+alert, punti di oggi) senza join — e con un solo indice.</p>
 <h1 id="autenticazione-e-multi-utenza">4. Autenticazione e
 multi-utenza</h1>
 <h2 id="registrazione-e-login">Registrazione e login</h2>
@@ -269,24 +291,30 @@ class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a hr
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="bu">hash</span> <span class="op">=</span> <span class="ss">f&quot;pbkdf2_sha256$600000$</span><span class="sc">{</span>salt<span class="sc">}</span><span class="ss">$</span><span class="sc">{</span>dk<span class="sc">.</span><span class="bu">hex</span>()<span class="sc">}</span><span class="ss">&quot;</span></span></code></pre></div>
 <p>Il confronto usa <code>hmac.compare_digest</code> (tempo costante,
 niente timing attack).</p>
-<h2 id="token">Token</h2>
+<h2 id="token-e-chiave-di-firma">Token e chiave di firma</h2>
 <ul>
 <li><strong>JWT HS256</strong>, payload
 <code>{sub, iat, exp}</code>.</li>
 <li>Scadenza di default <strong>7 giorni</strong>
 (<code>PRICELENS_TOKEN_EXPIRE_MINUTES</code>).</li>
-<li>Chiave <code>PRICELENS_SECRET_KEY</code>; se assente ne viene
-generata una casuale all’avvio (in produzione va impostata fissa).</li>
+<li>La chiave viene da <code>PRICELENS_SECRET_KEY</code>; se assente
+viene <strong>persistita</strong> in <code>backend/.secret_key</code>
+(permessi <code>0600</code>) e riusata ai riavvii. Così le sessioni non
+decadono ad ogni restart e più worker condividono la stessa chiave.</li>
+<li>In produzione si può impostare <code>PRICELENS_SECRET_KEY</code> da
+un secret manager.</li>
 </ul>
-<h2 id="isolamento-tra-utenti">Isolamento tra utenti</h2>
-<p>Ogni endpoint applicativo ha la dipendenza
-<code>CurrentUserDep</code>. Le query includono sempre
-<code>WHERE user_id = &lt;utente&gt;</code>. Le letture per ID
-verificano la proprietà:</p>
+<h2 id="team-e-isolamento">Team e isolamento</h2>
+<p>Ogni utente appartiene a uno o più <strong>team</strong>. Il team
+attivo si sceglie con l’header <code>X-Team-Id</code> (se assente, si
+usa il primo team dell’utente). Ogni endpoint applicativo ha la
+dipendenza <code>CurrentTeamDep</code> e le query includono
+<code>WHERE team_id = &lt;team&gt;</code>. Le letture per ID verificano
+la proprietà:</p>
 <div class="sourceCode" id="cb5"><pre
-class="sourceCode python"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> _get_owned(session, user_id, product_id) <span class="op">-&gt;</span> Product:</span>
+class="sourceCode python"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> _get_owned(session, team_id, product_id) <span class="op">-&gt;</span> Product:</span>
 <span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>    product <span class="op">=</span> session.get(Product, product_id)</span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> product <span class="kw">is</span> <span class="va">None</span> <span class="kw">or</span> product.user_id <span class="op">!=</span> user_id:</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> product <span class="kw">is</span> <span class="va">None</span> <span class="kw">or</span> product.team_id <span class="op">!=</span> team_id:</span>
 <span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>        <span class="cf">raise</span> HTTPException(<span class="dv">404</span>, <span class="st">&quot;Prodotto non trovato&quot;</span>)</span>
 <span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> product</span></code></pre></div>
 <p>Restituire <strong>404</strong> (invece di 403) evita di rivelare
@@ -295,7 +323,7 @@ l’esistenza di risorse altrui (anti-IDOR).</p>
 raccolta</h1>
 <p>Il <code>collector</code> è il cuore pulsante. Ad ogni “giro” crea un
 <code>PricePoint</code> per ogni combinazione <strong>prodotto attivo ×
-competitor attivo</strong> dell’utente.</p>
+competitor attivo</strong> del team.</p>
 <h2 id="fonte-simulata-default">Fonte simulata (default)</h2>
 <p>Pensata per demo e test: ogni competitor ha un prezzo “di
 riferimento” <code>base = current_price × base_ratio</code> e si muove
@@ -691,7 +719,7 @@ avviano il download.</p>
 <strong><code>/docs</code></strong>.</p>
 <h1 id="il-frontend">12. Il frontend</h1>
 <p>SPA React in TypeScript, con routing client-side e un design system
-minimale (Tailwind). Sei schermate:</p>
+minimale (Tailwind). Otto schermate:</p>
 <table>
 <colgroup>
 <col style="width: 50%" />
@@ -737,8 +765,14 @@ creazione</td>
 <td><strong>Alert</strong></td>
 <td>Lista filtrabile, segna-letto, export</td>
 </tr>
+<tr>
+<td><strong>Attività</strong></td>
+<td>Audit log del team: chi ha fatto cosa, quando, da quale IP</td>
+</tr>
 </tbody>
 </table>
+<p>Nella sidebar il <strong>team switcher</strong> cambia il workspace
+attivo (header <code>X-Team-Id</code>).</p>
 <h2 id="struttura-del-codice">Struttura del codice</h2>
 <pre><code>frontend/src/
 ├── App.tsx            # routing + auth gate
@@ -778,9 +812,28 @@ ricaricare la pagina.</p>
 <td>JWT HS256 firmato, scadenza configurabile</td>
 </tr>
 <tr>
+<td>Chiave</td>
+<td>Persistita in <code>backend/.secret_key</code> (0600) se
+<code>PRICELENS_SECRET_KEY</code> manca</td>
+</tr>
+<tr>
 <td>Isolamento dati</td>
-<td><code>WHERE user_id = …</code> su ogni query; 404 su risorse
+<td><code>WHERE team_id = …</code> su ogni query; 404 su risorse
 altrui</td>
+</tr>
+<tr>
+<td>Ruoli team</td>
+<td>owner/admin/member: solo owner/admin invitano o rimuovono
+membri</td>
+</tr>
+<tr>
+<td>Rate limiting</td>
+<td>10 richieste/min per IP su <code>/api/auth</code>, 300/min sulle
+altre API</td>
+</tr>
+<tr>
+<td>Audit log</td>
+<td>Registro append-only per team (azione, entità, dettaglio, IP)</td>
 </tr>
 <tr>
 <td>Header</td>
@@ -805,9 +858,10 @@ enumerazioni)</td>
 </tbody>
 </table>
 <blockquote>
-<p><strong>Nota.</strong> <code>PRICELENS_SECRET_KEY</code> va impostata
-fissa in produzione: con la chiave casuale i token vengono invalidati ad
-ogni riavvio.</p>
+<p><strong>Nota.</strong> In un deployment multi-istanza imposta
+<code>PRICELENS_SECRET_KEY</code> (o condividi lo stesso
+<code>.secret_key</code>): il rate limiter è in-process, quindi per più
+worker serve un limiter condiviso (Redis) se vuoi un limite globale.</p>
 </blockquote>
 <h1 id="avvio-e-configurazione">14. Avvio e configurazione</h1>
 <h2 id="comandi">Comandi</h2>
@@ -819,10 +873,16 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href=
 <span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> frontend  <span class="co"># Vite :5173 (proxy /api → :8000)</span></span>
 <span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> test      <span class="co"># suite pytest</span></span></code></pre></div>
 <p>Al primo avvio vengono creati il database e i dati demo:</p>
-<pre><code>demo@pricelens.it / demo1234
-12 prodotti · 6 competitor · 60 giorni di storico</code></pre>
+<pre><code>demo@pricelens.it   / demo1234   (owner)
+collega@pricelens.it / demo1234   (member)
+Team: PriceLens HQ · 12 prodotti · 6 competitor · 60 giorni di storico</code></pre>
 <h2 id="variabili-dambiente">Variabili d’ambiente</h2>
 <table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
 <thead>
 <tr>
 <th>Variabile</th>
@@ -834,12 +894,17 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href=
 <tr>
 <td><code>PRICELENS_DATABASE_URL</code></td>
 <td><code>sqlite:///./pricelens.db</code></td>
-<td>Database</td>
+<td>Database (SQLite o Postgres)</td>
 </tr>
 <tr>
 <td><code>PRICELENS_SECRET_KEY</code></td>
-<td>casuale</td>
+<td>persistita su file</td>
 <td>Chiave firma JWT</td>
+</tr>
+<tr>
+<td><code>PRICELENS_SECRET_KEY_FILE</code></td>
+<td><code>backend/.secret_key</code></td>
+<td>File dove persistere la chiave</td>
 </tr>
 <tr>
 <td><code>PRICELENS_TOKEN_EXPIRE_MINUTES</code></td>
@@ -856,12 +921,27 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href=
 <td><code>1</code></td>
 <td><code>0</code> per disattivare</td>
 </tr>
+<tr>
+<td><code>PRICELENS_RATE_LIMIT_ENABLED</code></td>
+<td><code>1</code></td>
+<td><code>0</code> per disattivare il rate limiting</td>
+</tr>
+<tr>
+<td><code>PRICELENS_RATE_LIMIT_PER_MINUTE</code></td>
+<td><code>300</code></td>
+<td>Limite API per IP al minuto</td>
+</tr>
+<tr>
+<td><code>PRICELENS_AUTH_RATE_LIMIT_PER_MINUTE</code></td>
+<td><code>10</code></td>
+<td>Limite auth per IP al minuto</td>
+</tr>
 </tbody>
 </table>
 <h1 id="test">15. Test</h1>
-<p>La suite (<code>backend/tests</code>, <strong>20 test</strong>) usa
-il <code>TestClient</code> di FastAPI e un database temporaneo isolato,
-quindi replica il comportamento reale dell’app.</p>
+<p>Due suite, entrambe eseguite in CI.</p>
+<p><strong>Backend</strong> (<code>backend/tests</code>, <strong>36
+test</strong>) con <code>TestClient</code> e database temporaneo:</p>
 <table>
 <colgroup>
 <col style="width: 50%" />
@@ -884,8 +964,13 @@ quindi replica il comportamento reale dell’app.</p>
 registrazione duplicata</td>
 </tr>
 <tr>
+<td>Team</td>
+<td>lista/creazione, invito e rimozione membri, isolamento tra team,
+ruoli</td>
+</tr>
+<tr>
 <td>Isolamento</td>
-<td>un nuovo utente non vede i dati del demo</td>
+<td>un nuovo utente non vede i dati altrui</td>
 </tr>
 <tr>
 <td>Dashboard</td>
@@ -917,12 +1002,23 @@ duplicato</td>
 <td>CSV e XLSX</td>
 </tr>
 <tr>
-<td>Scheduler</td>
-<td>endpoint di stato</td>
+<td>Audit</td>
+<td>registrazione azioni e isolamento tra team</td>
+</tr>
+<tr>
+<td>Unit</td>
+<td>hashing, parsing importi/JSON-LD/regex, math repricing, rate
+limiter</td>
 </tr>
 </tbody>
 </table>
-<p>Esecuzione: <code>make test</code> → <code>20 passed</code>.</p>
+<p><strong>Frontend</strong> (<code>frontend/src</code>, <strong>16
+test</strong> con Vitest + Testing Library): formattazione
+valute/percentuali, storage token/team, componenti <code>Badge</code> e
+<code>PriceDelta</code>.</p>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> test                 <span class="co"># backend → 36 passed</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> frontend <span class="kw">&amp;&amp;</span> <span class="ex">npm</span> test   <span class="co"># frontend → 16 passed</span></span></code></pre></div>
 <h1 id="note-operative">16. Note operative</h1>
 <h2 id="icloud-drive-e-disco-pieno">iCloud Drive e disco pieno</h2>
 <p>Se il progetto vive in una cartella sincronizzata con iCloud Drive e

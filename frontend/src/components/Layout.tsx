@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
+  Activity,
   Bell,
   LayoutDashboard,
   LogOut,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
+import { getTeamId, setTeamId } from "../lib/auth";
 import { useApp, useFetch } from "../lib/hooks";
 
 const NAV = [
@@ -18,6 +20,7 @@ const NAV = [
   { to: "/repricing", label: "Repricing", icon: Sparkles },
   { to: "/competitors", label: "Competitor", icon: Store },
   { to: "/alerts", label: "Alert", icon: Bell },
+  { to: "/audit", label: "Attività", icon: Activity },
 ];
 
 const TITLES: Record<string, string> = {
@@ -26,6 +29,7 @@ const TITLES: Record<string, string> = {
   "/repricing": "Repricing intelligente",
   "/competitors": "Competitor",
   "/alerts": "Alert",
+  "/audit": "Registro attività",
 };
 
 export function Layout({ onLogout }: { onLogout: () => void }) {
@@ -33,13 +37,26 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
   const { refresh } = useApp();
   const [collecting, setCollecting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [activeTeam, setActiveTeam] = useState<number | null>(() => {
+    const stored = getTeamId();
+    return stored ? Number(stored) : null;
+  });
 
   const { data: counts } = useFetch(() => api.alertCounts());
   const { data: user } = useFetch(() => api.me());
+  const { data: teams } = useFetch(() => api.teams());
+
+  const currentTeamId = activeTeam ?? teams?.[0]?.id ?? null;
 
   const title =
     TITLES[location.pathname] ??
     (location.pathname.startsWith("/products/") ? "Dettaglio prodotto" : "PriceLens");
+
+  function handleTeamChange(teamId: number) {
+    setTeamId(teamId);
+    setActiveTeam(teamId);
+    refresh();
+  }
 
   async function handleCollect() {
     setCollecting(true);
@@ -70,7 +87,24 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
 
-        <nav className="mt-2 flex flex-1 flex-col gap-1 px-3">
+        <div className="px-3 pb-2">
+          <label className="mb-1 block px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            Team
+          </label>
+          <select
+            value={currentTeamId ?? ""}
+            onChange={(e) => handleTeamChange(Number(e.target.value))}
+            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs font-medium text-slate-700 focus:border-indigo-500 focus:outline-none"
+          >
+            {(teams ?? []).map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <nav className="mt-1 flex flex-1 flex-col gap-1 px-3">
           {NAV.map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}

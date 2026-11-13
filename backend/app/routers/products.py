@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from sqlmodel import select
 
 from ..analytics import latest_prices, market_stats, repricing_recommendation
+from ..audit import log
 from ..database import SessionDep
 from ..models import Alert, Competitor, PricePoint, Product
 from ..models import utcnow
@@ -19,14 +20,14 @@ from ..schemas import (
     ProductUpdate,
     RepricingRecommendation,
 )
-from ..security import CurrentUserDep
+from ..security import CurrentTeamDep, CurrentUserDep
 
 router = APIRouter(prefix="/products", tags=["products"])
 
 
-def _get_owned(session: SessionDep, user_id: int, product_id: int) -> Product:
+def _get_owned(session: SessionDep, team_id: int, product_id: int) -> Product:
     product = session.get(Product, product_id)
-    if product is None or product.user_id != user_id:
+    if product is None or product.team_id != team_id:
         raise HTTPException(status_code=404, detail="Prodotto non trovato")
     return product
 
@@ -83,14 +84,14 @@ def _competitor_prices(session: SessionDep, product_id: int) -> list[CompetitorP
 
 @router.get("", response_model=list[ProductRead])
 def list_products(
-    user: CurrentUserDep,
+    team: CurrentTeamDep,
     session: SessionDep,
     search: str | None = Query(default=None),
     category: str | None = Query(default=None),
     active: bool | None = Query(default=None),
     include_recommendation: bool = Query(default=True),
 ):
-    query = select(Product).where(Product.user_id == user.id)
+    query = select(Product).where(Product.team_id == team.id)
     if search:
         term = f"%{search}%"
         query = query.where(Product.name.ilike(term) | Product.sku.ilike(term) | Product.brand.ilike(term))
@@ -103,14 +104,14 @@ def list_products(
 
 
 @router.get("/categories", response_model=list[str])
-def list_categories(user: CurrentUserDep, session: SessionDep):
-    rows = session.exec(select(Product.category).where(Product.user_id == user.id).distinct()).all()
+def list_categories(team: CurrentTeamDep, session: SessionDep):
+    rows = session.exec(select(Product.category).where(Product.team_id == team.id).distinct()).all()
     return sorted(c for c in rows if c)
 
 
 @router.get("/{product_id}", response_model=ProductDetail)
-def get_product(product_id: int, user: CurrentUserDep, session: SessionDep):
-    product = _get_owned(session, user.id, product_id)
+def get_product(product_id: int, team: CurrentTeamDep, session: SessionDep):
+    product = _get_owned(session, team.id, product_id)
     base = _to_read(session, product, include_recommendation=True)
     return ProductDetail(
         **base.model_dump(),
@@ -119,27 +120,51 @@ def get_product(product_id: int, user: CurrentUserDep, session: SessionDep):
 
 
 @router.post("", response_model=ProductRead, status_code=201)
-def create_product(payload: ProductCreate, user: CurrentUserDep, session: SessionDep):
+def create_product(
+    payload: ProductCreate,
+    user: CurrentUserDep,
+    team: CurrentTeamDep,
+    session: SessionDep,
+    request: Request,
+):
     exists = session.exec(
-        select(Product).where(Product.user_id == user.id, Product.sku == payload.sku)
+        select(Product).where(Product.team_id == team.id, Product.sku == payload.sku)
     ).first()
     if exists is not None:
         raise HTTPException(status_code=409, detail="SKU già esistente")
-    product = Product(**payload.model_dump(), user_id=user.id)
+    product = Product(**payload.model_dump(), team_id=team.id)
     session.add(product)
     session.commit()
     session.refresh(product)
+    log(
+        session,
+        team_id=team.id,
+        user_id=user.id,
+        action="product.create",
+        entity="product",
+        entity_id=product.id,
+        detail=f"{product.sku} — {product.name}",
+        request=request,
+    )
+    session.commit()
     return _to_read(session, product)
 
 
 @router.patch("/{product_id}", response_model=ProductRead)
-def update_product(product_id: int, payload: ProductUpdate, user: CurrentUserDep, session: SessionDep):
-    product = _get_owned(session, user.id, product_id)
+def update_product(
+    product_id: int,
+    payload: ProductUpdate,
+    user: CurrentUserDep,
+    team: CurrentTeamDep,
+    session: SessionDep,
+    request: Request,
+):
+    product = _get_owned(session, team.id, product_id)
     changes = payload.model_dump(exclude_unset=True)
     if "sku" in changes:
         dup = session.exec(
             select(Product).where(
-                Product.user_id == user.id,
+                Product.team_id == team.id,
                 Product.sku == changes["sku"],
                 Product.id != product_id,
             )
@@ -150,26 +175,48 @@ def update_product(product_id: int, payload: ProductUpdate, user: CurrentUserDep
         setattr(product, key, value)
     product.updated_at = utcnow()
     session.add(product)
+    log(
+        session,
+        team_id=team.id,
+        user_id=user.id,
+        action="product.update",
+        entity="product",
+        entity_id=product.id,
+        detail=", ".join(sorted(changes.keys())) or None,
+        request=request,
+    )
     session.commit()
     session.refresh(product)
     return _to_read(session, product, include_recommendation=True)
 
 
 @router.delete("/{product_id}", status_code=204)
-def delete_product(product_id: int, user: CurrentUserDep, session: SessionDep):
-    product = _get_owned(session, user.id, product_id)
+def delete_product(
+    product_id: int, user: CurrentUserDep, team: CurrentTeamDep, session: SessionDep, request: Request
+):
+    product = _get_owned(session, team.id, product_id)
     session.delete(product)
+    log(
+        session,
+        team_id=team.id,
+        user_id=user.id,
+        action="product.delete",
+        entity="product",
+        entity_id=product_id,
+        detail=product.name,
+        request=request,
+    )
     session.commit()
 
 
 @router.get("/{product_id}/history", response_model=list[HistorySeries])
 def product_history(
     product_id: int,
-    user: CurrentUserDep,
+    team: CurrentTeamDep,
     session: SessionDep,
     days: int = Query(default=30, ge=1, le=365),
 ):
-    _get_owned(session, user.id, product_id)
+    _get_owned(session, team.id, product_id)
 
     cutoff = utcnow() - timedelta(days=days)
     points = session.exec(
@@ -198,6 +245,6 @@ def product_history(
 
 
 @router.get("/{product_id}/recommendation", response_model=RepricingRecommendation)
-def product_recommendation(product_id: int, user: CurrentUserDep, session: SessionDep):
-    product = _get_owned(session, user.id, product_id)
+def product_recommendation(product_id: int, team: CurrentTeamDep, session: SessionDep):
+    product = _get_owned(session, team.id, product_id)
     return repricing_recommendation(session, product)
