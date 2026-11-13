@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title$</title>
+<link rel="stylesheet" href="doc.css">
+</head>
+<body>
+
+<header class="cover">
+  <div class="cover-kicker">Pricing Intelligence</div>
+  <div class="cover-mark">◆</div>
+  <h1 class="cover-title">$title$</h1>
+  $if(subtitle)$<p class="cover-sub">$subtitle$</p>$endif$
+  <div class="cover-rule"></div>
+  $if(author)$<p class="cover-author">$author$</p>$endif$
+  $if(date)$<p class="cover-date">$date$</p>$endif$
+  <p class="cover-foot">Clone migliorato di Minderest · metodologia REA</p>
+</header>
+
+$if(toc)$
+<nav id="TOC" role="doc-toc">
+<h2 class="toc-title">Indice</h2>
+$toc$
+</nav>
+$endif$
+
+$body$
+
+</body>
+</html>

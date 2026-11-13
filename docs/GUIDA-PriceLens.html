@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PriceLens</title>
+<link rel="stylesheet" href="doc.css">
+</head>
+<body>
+
+<header class="cover">
+  <div class="cover-kicker">Pricing Intelligence</div>
+  <div class="cover-mark">◆</div>
+  <h1 class="cover-title">PriceLens</h1>
+  <p class="cover-sub">Guida tecnica e funzionale — come funziona
+l’app</p>
+  <div class="cover-rule"></div>
+  <p class="cover-author">Pricing Intelligence · clone migliorato di
+Minderest</p>
+  <p class="cover-date">Novembre 2025</p>
+  <p class="cover-foot">Clone migliorato di Minderest · metodologia REA</p>
+</header>
+
+<nav id="TOC" role="doc-toc">
+<h2 class="toc-title">Indice</h2>
+<ul>
+<li><a href="#panoramica" id="toc-panoramica">1. Panoramica</a></li>
+<li><a href="#architettura" id="toc-architettura">2.
+Architettura</a></li>
+<li><a href="#modello-dati" id="toc-modello-dati">3. Modello
+dati</a></li>
+<li><a href="#autenticazione-e-multi-utenza"
+id="toc-autenticazione-e-multi-utenza">4. Autenticazione e
+multi-utenza</a></li>
+<li><a href="#il-ciclo-del-prezzo-la-raccolta"
+id="toc-il-ciclo-del-prezzo-la-raccolta">5. Il ciclo del prezzo: la
+raccolta</a></li>
+<li><a href="#analisi-di-mercato" id="toc-analisi-di-mercato">6. Analisi
+di mercato</a></li>
+<li><a href="#motore-di-repricing" id="toc-motore-di-repricing">7.
+Motore di repricing</a></li>
+<li><a href="#sistema-di-alert" id="toc-sistema-di-alert">8. Sistema di
+alert</a></li>
+<li><a href="#scheduler-periodico" id="toc-scheduler-periodico">9.
+Scheduler periodico</a></li>
+<li><a href="#export-csv-ed-excel" id="toc-export-csv-ed-excel">10.
+Export CSV ed Excel</a></li>
+<li><a href="#riferimento-api" id="toc-riferimento-api">11. Riferimento
+API</a></li>
+<li><a href="#il-frontend" id="toc-il-frontend">12. Il frontend</a></li>
+<li><a href="#sicurezza" id="toc-sicurezza">13. Sicurezza</a></li>
+<li><a href="#avvio-e-configurazione"
+id="toc-avvio-e-configurazione">14. Avvio e configurazione</a></li>
+<li><a href="#test" id="toc-test">15. Test</a></li>
+<li><a href="#note-operative" id="toc-note-operative">16. Note
+operative</a></li>
+<li><a href="#glossario" id="toc-glossario">17. Glossario</a></li>
+</ul>
+</nav>
+
+<h1 id="panoramica">1. Panoramica</h1>
+<p><strong>PriceLens</strong> è un’applicazione web di <em>pricing
+intelligence</em> per l’e-commerce. Monitora i prezzi dei competitor su
+retailer e marketplace, li confronta con il tuo prezzo, genera alert
+automatici e — soprattutto — <strong>suggerisce il prezzo da
+applicare</strong> con margini protetti.</p>
+<p>A differenza di un semplice osservatore di prezzi, PriceLens chiude
+il ciclo: <em>osserva → analizza → consiglia → applica</em>. Il
+passaggio finale è un pulsante.</p>
+<h2 id="a-chi-serve">A chi serve</h2>
+<ul>
+<li><strong>Retailer online</strong> che vogliono restare competitivi
+senza erodere il margine.</li>
+<li><strong>Brand / manufacturer</strong> che devono controllare la
+compliance <strong>MAP/MSRP</strong> (prezzo minimo pubblicizzato) dei
+propri rivenditori.</li>
+<li><strong>Team pricing</strong> che hanno bisogno di storico,
+indicatori e automazioni.</li>
+</ul>
+<h2 id="cosa-risolve">Cosa risolve</h2>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Problema</th>
+<th>Come lo risolve PriceLens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>I competitor cambiano prezzo ogni giorno</td>
+<td>Raccolta automatica periodica (scheduler) + storico</td>
+</tr>
+<tr>
+<td>Non sai se sei caro o economico</td>
+<td>Posizione (1° = più economico) e <strong>indice di competitività
+0–100</strong></td>
+</tr>
+<tr>
+<td>Ribassare il prezzo erode il margine</td>
+<td>Motore di repricing con <strong>floor di margine</strong> e
+<strong>ceiling MSRP</strong></td>
+</tr>
+<tr>
+<td>Scopri le violazioni MAP troppo tardi</td>
+<td>Alert <strong>critici</strong> immediati ad ogni raccolta</td>
+</tr>
+<tr>
+<td>I dati restano chiusi in un foglio Excel</td>
+<td>Export <strong>CSV / Excel</strong>, API REST, multi-utente</td>
+</tr>
+</tbody>
+</table>
+<h1 id="architettura">2. Architettura</h1>
+<p>PriceLens è un monolite modulare a due strati: un backend
+<strong>FastAPI</strong> (API REST + serve il frontend compilato) e un
+frontend <strong>React/TypeScript</strong> (SPA). Il database è
+<strong>SQLite</strong> (zero configurazione, adatto a demo e piccoli
+deployment).</p>
+<pre><code>┌──────────────────────────────┐         ┌───────────────────────────────────┐
+│  Browser — SPA React         │  HTTP   │  FastAPI (uvicorn)                │
+│  Vite build → frontend/dist  │ ──────► │  /api/*  (JWT Bearer)             │
+│  Tailwind + Recharts         │ ◄────── │  app.frontend(&quot;/&quot;) serve la SPA   │
+└──────────────────────────────┘         └───────────────┬───────────────────┘
+                                                         │ SQLModel
+                                         ┌───────────────▼───────────────────┐
+                                         │  SQLite  pricelens.db             │
+                                         │  User · Product · Competitor      │
+                                         │  PricePoint · Alert               │
+                                         └───────────────┬───────────────────┘
+                                                         │
+                              ┌──────────────────────────▼──────────────────┐
+                              │  Collector (thread)                         │
+                              │  simulato | JSON-LD | CSS selector | regex  │
+                              └──────────────────────────┬──────────────────┘
+                                                         │
+                              ┌──────────────────────────▼──────────────────┐
+                              │  Scheduler asyncio (ogni N secondi)         │
+                              └─────────────────────────────────────────────┘</code></pre>
+<h2 id="stack-tecnologico">Stack tecnologico</h2>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Livello</th>
+<th>Tecnologie</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Backend</td>
+<td>Python 3.12, FastAPI, SQLModel, SQLite, Uvicorn</td>
+</tr>
+<tr>
+<td>Sicurezza</td>
+<td>PyJWT (HS256), PBKDF2-HMAC-SHA256, header HTTP</td>
+</tr>
+<tr>
+<td>Raccolta</td>
+<td>HTTPX, BeautifulSoup4, regex, simulatore deterministico</td>
+</tr>
+<tr>
+<td>Export</td>
+<td><code>csv</code> (stdlib), openpyxl</td>
+</tr>
+<tr>
+<td>Frontend</td>
+<td>React 18, TypeScript, Vite 6, Tailwind CSS 4, Recharts, React Router
+6</td>
+</tr>
+<tr>
+<td>Test</td>
+<td>pytest, FastAPI TestClient</td>
+</tr>
+</tbody>
+</table>
+<h2 id="flusso-di-una-richiesta">Flusso di una richiesta</h2>
+<ol type="1">
+<li>Il browser carica la SPA da <code>http://host:8000/</code>.</li>
+<li>La SPA chiama le API con
+<code>Authorization: Bearer &lt;JWT&gt;</code>.</li>
+<li>FastAPI risolve l’utente dal token e filtra <strong>tutti</strong> i
+dati per <code>user_id</code>.</li>
+<li>Il router calcola statistiche di mercato e restituisce JSON.</li>
+<li>Il frontend disegna tabelle, grafici e card.</li>
+</ol>
+<h1 id="modello-dati">3. Modello dati</h1>
+<p>Cinque entità, tutte legate all’utente tramite <code>user_id</code>
+(multi-tenancy a livello di riga).</p>
+<pre><code>User 1───N Product 1───N PricePoint N───1 Competitor
+               │
+               └──────N Alert</code></pre>
+<h2 id="entità">Entità</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Entità</th>
+<th>Campi principali</th>
+<th>Ruolo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>User</strong></td>
+<td>id, email (unique), password_hash</td>
+<td>Account proprietario dei dati</td>
+</tr>
+<tr>
+<td><strong>Product</strong></td>
+<td>sku, name, brand, category, cost_price, current_price, msrp,
+map_price, strategy, min_margin_pct</td>
+<td>Il prodotto che vendi</td>
+</tr>
+<tr>
+<td><strong>Competitor</strong></td>
+<td>name, domain, type, price_source_type, price_source_config</td>
+<td>Chi monitori</td>
+</tr>
+<tr>
+<td><strong>PricePoint</strong></td>
+<td>product_id, competitor_id, price, stock_status, captured_at</td>
+<td>Una rilevazione di prezzo nel tempo</td>
+</tr>
+<tr>
+<td><strong>Alert</strong></td>
+<td>product_id, competitor_id, type, severity, message, read</td>
+<td>Evento da leggere</td>
+</tr>
+</tbody>
+</table>
+<h2 id="vincoli-e-indici">Vincoli e indici</h2>
+<ul>
+<li><code>UniqueConstraint(user_id, sku)</code> — lo SKU è unico
+<strong>per utente</strong>.</li>
+<li>Indice composito
+<code>(product_id, competitor_id, captured_at)</code> sui
+<code>PricePoint</code>: rende veloce l’ultimo prezzo per
+competitor.</li>
+<li>Indice su <code>captured_at</code> per le query “di oggi” della
+dashboard.</li>
+</ul>
+<h2 id="perché-user_id-anche-su-pricepoint-e-alert">Perché
+<code>user_id</code> anche su PricePoint e Alert</h2>
+<p>Anche se tecnicamente derivabili dal prodotto, tenerli denormalizzati
+permette di filtrare con una sola condizione
+(<code>WHERE user_id = ?</code>) le query più frequenti (conteggio
+alert, punti di oggi) senza join.</p>
+<h1 id="autenticazione-e-multi-utenza">4. Autenticazione e
+multi-utenza</h1>
+<h2 id="registrazione-e-login">Registrazione e login</h2>
+<pre><code>POST /api/auth/register   → crea utente, restituisce JWT
+POST /api/auth/login      → verifica credenziali, restituisce JWT
+GET  /api/auth/me         → profilo corrente</code></pre>
+<p>La password non è mai salvata in chiaro:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>salt <span class="op">=</span> secrets.token_hex(<span class="dv">16</span>)</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>dk <span class="op">=</span> hashlib.pbkdf2_hmac(<span class="st">&quot;sha256&quot;</span>, password.encode(), <span class="bu">bytes</span>.fromhex(salt), <span class="dv">600_000</span>)</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="bu">hash</span> <span class="op">=</span> <span class="ss">f&quot;pbkdf2_sha256$600000$</span><span class="sc">{</span>salt<span class="sc">}</span><span class="ss">$</span><span class="sc">{</span>dk<span class="sc">.</span><span class="bu">hex</span>()<span class="sc">}</span><span class="ss">&quot;</span></span></code></pre></div>
+<p>Il confronto usa <code>hmac.compare_digest</code> (tempo costante,
+niente timing attack).</p>
+<h2 id="token">Token</h2>
+<ul>
+<li><strong>JWT HS256</strong>, payload
+<code>{sub, iat, exp}</code>.</li>
+<li>Scadenza di default <strong>7 giorni</strong>
+(<code>PRICELENS_TOKEN_EXPIRE_MINUTES</code>).</li>
+<li>Chiave <code>PRICELENS_SECRET_KEY</code>; se assente ne viene
+generata una casuale all’avvio (in produzione va impostata fissa).</li>
+</ul>
+<h2 id="isolamento-tra-utenti">Isolamento tra utenti</h2>
+<p>Ogni endpoint applicativo ha la dipendenza
+<code>CurrentUserDep</code>. Le query includono sempre
+<code>WHERE user_id = &lt;utente&gt;</code>. Le letture per ID
+verificano la proprietà:</p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> _get_owned(session, user_id, product_id) <span class="op">-&gt;</span> Product:</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>    product <span class="op">=</span> session.get(Product, product_id)</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> product <span class="kw">is</span> <span class="va">None</span> <span class="kw">or</span> product.user_id <span class="op">!=</span> user_id:</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>        <span class="cf">raise</span> HTTPException(<span class="dv">404</span>, <span class="st">&quot;Prodotto non trovato&quot;</span>)</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> product</span></code></pre></div>
+<p>Restituire <strong>404</strong> (invece di 403) evita di rivelare
+l’esistenza di risorse altrui (anti-IDOR).</p>
+<h1 id="il-ciclo-del-prezzo-la-raccolta">5. Il ciclo del prezzo: la
+raccolta</h1>
+<p>Il <code>collector</code> è il cuore pulsante. Ad ogni “giro” crea un
+<code>PricePoint</code> per ogni combinazione <strong>prodotto attivo ×
+competitor attivo</strong> dell’utente.</p>
+<h2 id="fonte-simulata-default">Fonte simulata (default)</h2>
+<p>Pensata per demo e test: ogni competitor ha un prezzo “di
+riferimento” <code>base = current_price × base_ratio</code> e si muove
+con un <strong>random walk mean-reverting</strong>:</p>
+<ul>
+<li><code>base_ratio</code> — posizione tipica (0.96 = 4% più economico,
+1.06 = 6% più caro);</li>
+<li><code>volatility</code> — ampiezza del rumore giornaliero;</li>
+<li><code>promo_prob</code> — probabilità di una promozione temporanea
+(−6%…−20%);</li>
+<li><code>stockout_prob</code> — probabilità di esaurimento stock.</li>
+</ul>
+<pre><code>nuovo_prezzo = ultimo + (base − ultimo) × 0.3 + base × rumore(−vol, +vol)</code></pre>
+<p>Il fattore <code>0.3</code> è la <em>forza di richiamo</em>: se il
+prezzo si allontana troppo dalla base, tende a tornare. Ne risultano
+serie storiche realistiche senza dipendere dalla rete.</p>
+<h2 id="fonte-live-url">Fonte live (URL)</h2>
+<p>Con <code>price_source_type = "url"</code> il collector scarica la
+pagina (HTTPX) ed estrae il prezzo con <strong>tre strategie</strong>
+configurabili:</p>
+<table>
+<thead>
+<tr>
+<th><code>selector_type</code></th>
+<th>Configurazione</th>
+<th>Esempio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>jsonld</code> (default)</td>
+<td>—</td>
+<td><code>schema.org/Product</code> → <code>offers.price</code></td>
+</tr>
+<tr>
+<td><code>css</code></td>
+<td><code>selector</code>, <code>attribute</code></td>
+<td><code>meta[itemprop=price]</code> + <code>content</code></td>
+</tr>
+<tr>
+<td><code>regex</code></td>
+<td><code>pattern</code> (gruppo <code>price</code>)</td>
+<td><code>"price"\s*:\s*"?([0-9.]+)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Il parsing degli importi normalizza i formati italiani e
+internazionali: <code>1.234,56</code> → <code>1234.56</code>,
+<code>99.99</code> → <code>99.99</code>, <code>€ 1 234,56</code> →
+<code>1234.56</code>.</p>
+<blockquote>
+<p><strong>Nota.</strong> Lo scraping live va usato solo su siti di cui
+hai il permesso di leggere i dati, rispettando ToS e
+<code>robots.txt</code>. In caso di errore il collector incrementa
+<code>errors</code> e non blocca il giro.</p>
+</blockquote>
+<h2 id="giro-di-raccolta">Giro di raccolta</h2>
+<pre><code>per ogni prodotto attivo:
+  per ogni competitor attivo:
+     prev = ultimo PricePoint
+     prezzo, stock = simula oppure fetch_url
+     inserisci nuovo PricePoint
+     genera alert confrontando con prev
+commit</code></pre>
+<h1 id="analisi-di-mercato">6. Analisi di mercato</h1>
+<p>Per ogni prodotto vengono calcolate, al volo, tre grandezze.</p>
+<h2 id="min-max-media">Min / max / media</h2>
+<p>Si considerano solo i competitor <strong>in stock</strong> con prezzo
+valorizzato: un prezzo di un prodotto esaurito non è un prezzo realmente
+acquistabile.</p>
+<h2 id="posizione">Posizione</h2>
+<p>Il rango del tuo prezzo tra i prezzi dei competitor:</p>
+<pre><code>posizione = (numero di competitor più economici di te) + 1</code></pre>
+<p><code>1</code> = sei il più economico. <code>N+1</code> = sei il più
+caro.</p>
+<h2 id="indice-di-competitività-0100">Indice di competitività
+(0–100)</h2>
+<p>Un punteggio normalizzato, indipendente dal numero di competitor:</p>
+<pre><code>indice = 100 × (N − posizione + 1) / N</code></pre>
+<ul>
+<li>più economico → <strong>100</strong></li>
+<li>più caro → <strong>100/N</strong> (tende a 0 con molti
+competitor)</li>
+</ul>
+<p>La dashboard media questo indice per dare un colpo d’occhio sulla
+salute del listino.</p>
+<h1 id="motore-di-repricing">7. Motore di repricing</h1>
+<p>Il repricing trasforma l’analisi in un’azione. Per ogni prodotto
+calcola:</p>
+<ol type="1">
+<li><strong>Floor</strong> (pavimento) — sotto cui non si scende mai:
+<code>max(MAP, costo × (1 + margine_minimo))</code></li>
+<li><strong>Ceiling</strong> (tetto) — sopra cui non si sale:
+<code>MSRP</code>, oppure <code>max competitor × 1.05</code> se manca
+l’MSRP.</li>
+<li><strong>Target</strong> secondo la strategia, poi
+<code>clamp(floor, target, ceiling)</code>.</li>
+</ol>
+<h2 id="le-quattro-strategie">Le quattro strategie</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Strategia</th>
+<th>Formula (indicativa)</th>
+<th>Quando usarla</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Allinea al minimo</strong> (<code>match_min</code>)</td>
+<td><code>min − max(0.01, min×1%)</code></td>
+<td>Presidio del prezzo più basso</td>
+</tr>
+<tr>
+<td><strong>Sottoquotazione</strong> (<code>undercut</code>)</td>
+<td><code>min × 0.98</code></td>
+<td>Aggressiva, −2% sul minimo</td>
+</tr>
+<tr>
+<td><strong>Margine protetto</strong>
+(<code>margin_protected</code>)</td>
+<td><code>max(floor, min)</code></td>
+<td>Default: competitivi senza perdere margine</td>
+</tr>
+<tr>
+<td><strong>Premium</strong> (<code>premium</code>)</td>
+<td><code>ceiling</code> (MSRP o max×1.03)</td>
+<td>Posizionamento alto di gamma</td>
+</tr>
+</tbody>
+</table>
+<h2 id="esempio-numerico">Esempio numerico</h2>
+<p>Prodotto: costo <strong>650 €</strong>, margine minimo
+<strong>15%</strong>, MAP <strong>799 €</strong>, MSRP <strong>899
+€</strong>.</p>
+<ul>
+<li>Floor = <code>max(799, 650 × 1.15)</code> =
+<code>max(799, 747.5)</code> = <strong>799 €</strong></li>
+<li>Competitor più economico = <strong>780 €</strong></li>
+<li>Strategia <code>margin_protected</code> → target =
+<code>max(799, 780)</code> = <strong>799 €</strong></li>
+<li>Ceiling = 899 € → il prezzo resta <strong>799 €</strong></li>
+<li>Margine = <code>(799−650)/799</code> = <strong>18,6 %</strong></li>
+</ul>
+<p>Se invece il competitor scendesse a <strong>760 €</strong>, il floor
+(799) vince ancora: PriceLens ti dice <em>“non scendere sotto 799”</em>
+— protegge il margine.</p>
+<h2 id="cosa-restituisce">Cosa restituisce</h2>
+<p>Ogni raccomandazione contiene: prezzo suggerito, margine stimato,
+delta % rispetto a oggi, nuova posizione prevista, floor, ceiling e una
+<strong>spiegazione in chiaro</strong> del perché. L’applicazione è un
+<code>POST /api/repricing/apply</code> che aggiorna
+<code>current_price</code>.</p>
+<h1 id="sistema-di-alert">8. Sistema di alert</h1>
+<p>Ogni osservazione viene confrontata con la precedente. Se scatta una
+condizione, viene creato un <code>Alert</code> con severità e
+messaggio.</p>
+<table>
+<thead>
+<tr>
+<th>Tipo</th>
+<th>Quando</th>
+<th>Severità</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>map_violation</code></td>
+<td>prezzo competitor &lt; MAP del prodotto</td>
+<td><strong>critico</strong></td>
+</tr>
+<tr>
+<td><code>price_drop</code></td>
+<td>calo ≥ <strong>3 %</strong></td>
+<td>avviso</td>
+</tr>
+<tr>
+<td><code>price_rise</code></td>
+<td>rialzo ≥ <strong>3 %</strong></td>
+<td>info</td>
+</tr>
+<tr>
+<td><code>out_of_stock</code></td>
+<td>stock passa a esaurito</td>
+<td>avviso</td>
+</tr>
+<tr>
+<td><code>back_in_stock</code></td>
+<td>rientro in stock</td>
+<td>info</td>
+</tr>
+</tbody>
+</table>
+<p>Gli alert sono per-utente, filtrabili per stato (letti/da leggere) e
+severità, e possono essere esportati. La dashboard mostra gli ultimi e
+il conteggio degli aperti.</p>
+<h1 id="scheduler-periodico">9. Scheduler periodico</h1>
+<p>Un task <strong>asyncio</strong> avviato nel <code>lifespan</code>
+dell’app esegue la raccolta in background:</p>
+<ul>
+<li>intervallo: <code>PRICELENS_COLLECT_INTERVAL_SECONDS</code> (default
+<strong>300 s</strong>);</li>
+<li>interruttore: <code>PRICELENS_SCHEDULER_ENABLED=0</code> per
+disattivarlo;</li>
+<li>per ogni utente, esegue <code>collect_round</code> in un thread
+(<code>asyncio.to_thread</code>), così il calcolo bloccante non ferma il
+loop degli eventi.</li>
+</ul>
+<p>Lo stato è consultabile su <code>GET /api/scheduler/status</code>
+(<code>enabled</code>, <code>interval_seconds</code>,
+<code>running</code>, <code>last_run</code>, <code>last_error</code>,
+<code>last_result</code>).</p>
+<blockquote>
+<p>Con più processi uvicorn ogni processo avrebbe il proprio scheduler:
+in produzione conviene un solo worker, oppure spostare la raccolta in un
+job esterno.</p>
+</blockquote>
+<h1 id="export-csv-ed-excel">10. Export CSV ed Excel</h1>
+<p>Tre endpoint, tutti filtrati per utente:</p>
+<pre><code>GET /api/export/products?format=csv|xlsx
+GET /api/export/alerts?format=csv|xlsx
+GET /api/export/history/{product_id}?format=csv|xlsx&amp;days=60</code></pre>
+<ul>
+<li><strong>CSV</strong>: generato con la stdlib <code>csv</code>,
+<code>text/csv; charset=utf-8</code>.</li>
+<li><strong>Excel</strong>: generato con <code>openpyxl</code>,
+<code>application/vnd.openxmlformats-…sheet</code>.</li>
+<li>Il file arriva con <code>Content-Disposition: attachment</code> e
+nome parlante (<code>pricelens-prodotti.csv</code>,
+<code>pricelens-storico-&lt;SKU&gt;.xlsx</code>).</li>
+</ul>
+<p>Nel frontend i pulsanti <strong>CSV / Excel</strong> scaricano il
+file via <code>fetch</code> con il token, creano un <code>Blob</code> e
+avviano il download.</p>
+<h1 id="riferimento-api">11. Riferimento API</h1>
+<p>Tutti gli endpoint (tranne <code>health</code>,
+<code>register</code>, <code>login</code>) richiedono
+<code>Authorization: Bearer &lt;token&gt;</code>.</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Metodo</th>
+<th>Percorso</th>
+<th>Descrizione</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/health</code></td>
+<td>Stato servizio (pubblico)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/auth/register</code></td>
+<td>Crea account</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/auth/login</code></td>
+<td>Autentica</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/auth/me</code></td>
+<td>Profilo corrente</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/dashboard</code></td>
+<td>KPI, movers, distribuzione, alert recenti</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/products</code></td>
+<td>Catalogo con statistiche (<code>search</code>,
+<code>category</code>, <code>active</code>)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/products/{id}</code></td>
+<td>Dettaglio + competitor + raccomandazione</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/products/{id}/history</code></td>
+<td>Storico prezzi (<code>days</code>)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/products/categories</code></td>
+<td>Categorie distinte</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/products</code></td>
+<td>Crea prodotto</td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/api/products/{id}</code></td>
+<td>Aggiorna prodotto</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/products/{id}</code></td>
+<td>Elimina prodotto</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/products/{id}/recommendation</code></td>
+<td>Solo raccomandazione</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/competitors</code></td>
+<td>Elenco competitor</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/competitors</code></td>
+<td>Crea competitor</td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/api/competitors/{id}</code></td>
+<td>Aggiorna competitor</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/competitors/{id}</code></td>
+<td>Elimina competitor</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/alerts</code></td>
+<td>Alert (<code>unread</code>, <code>severity</code>,
+<code>limit</code>)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/alerts/counts</code></td>
+<td>Conteggi totali/da leggere/critici</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/alerts/{id}/read</code></td>
+<td>Segna letto</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/alerts/read-all</code></td>
+<td>Segna tutti letti</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/repricing/preview</code></td>
+<td>Raccomandazioni per tutti i prodotti</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/repricing/apply</code></td>
+<td>Applica un prezzo suggerito</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/collect</code></td>
+<td>Raccolta immediata (utente corrente)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/scheduler/status</code></td>
+<td>Stato scheduler</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/export/...</code></td>
+<td>Export CSV/Excel</td>
+</tr>
+</tbody>
+</table>
+<p>La documentazione interattiva (OpenAPI/Swagger) è su
+<strong><code>/docs</code></strong>.</p>
+<h1 id="il-frontend">12. Il frontend</h1>
+<p>SPA React in TypeScript, con routing client-side e un design system
+minimale (Tailwind). Sei schermate:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Pagina</th>
+<th>Cosa mostra</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Login</strong></td>
+<td>Accesso/registrazione; token salvato in
+<code>localStorage</code></td>
+</tr>
+<tr>
+<td><strong>Dashboard</strong></td>
+<td>4 KPI, indice di competitività per prodotto, top movers, alert
+recenti</td>
+</tr>
+<tr>
+<td><strong>Prodotti</strong></td>
+<td>Tabella con prezzo, min/max competitor, posizione, indice, alert;
+creazione, export</td>
+</tr>
+<tr>
+<td><strong>Dettaglio</strong></td>
+<td>Grafico storico 7/30/60 giorni, KPI, card repricing, tabella
+competitor, modifica</td>
+</tr>
+<tr>
+<td><strong>Repricing</strong></td>
+<td>Tabella delle raccomandazioni con applicazione one-click</td>
+</tr>
+<tr>
+<td><strong>Competitor</strong></td>
+<td>Card con tipo, fonte (simulata/live), prodotti tracciati;
+creazione</td>
+</tr>
+<tr>
+<td><strong>Alert</strong></td>
+<td>Lista filtrabile, segna-letto, export</td>
+</tr>
+</tbody>
+</table>
+<h2 id="struttura-del-codice">Struttura del codice</h2>
+<pre><code>frontend/src/
+├── App.tsx            # routing + auth gate
+├── pages/             # le 7 schermate
+├── components/        # Layout, PriceChart, Modal, Badge, StatCard, …
+├── lib/
+│   ├── api.ts         # client tipizzato + gestione token/401
+│   ├── auth.ts        # salvataggio token
+│   ├── hooks.tsx      # AppProvider + useFetch con refresh globale
+│   └── format.ts      # EUR, percentuali, date, &quot;x min fa&quot;
+└── types.ts           # tipi allineati agli schemi backend</code></pre>
+<h2 id="pattern-di-caricamento">Pattern di caricamento</h2>
+<p><code>useFetch(fn, deps)</code> incapsula caricamento/errore e si
+ri-esegue quando cambia un “token di refresh” globale. Il pulsante
+<strong>Raccogli prezzi</strong> chiama <code>/api/collect</code> e poi
+<code>refresh()</code>: tutte le viste montate si aggiornano senza
+ricaricare la pagina.</p>
+<h1 id="sicurezza">13. Sicurezza</h1>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Misura</th>
+<th>Implementazione</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Password</td>
+<td>PBKDF2-HMAC-SHA256, 600.000 iterazioni, salt casuale per utente</td>
+</tr>
+<tr>
+<td>Token</td>
+<td>JWT HS256 firmato, scadenza configurabile</td>
+</tr>
+<tr>
+<td>Isolamento dati</td>
+<td><code>WHERE user_id = …</code> su ogni query; 404 su risorse
+altrui</td>
+</tr>
+<tr>
+<td>Header</td>
+<td><code>X-Content-Type-Options</code>,
+<code>X-Frame-Options: DENY</code>, <code>Referrer-Policy</code>,
+<code>Permissions-Policy</code></td>
+</tr>
+<tr>
+<td>CORS</td>
+<td>Solo origini di sviluppo esplicite (<code>localhost:5173</code>,
+<code>127.0.0.1:5173</code>, <code>localhost:3000</code>)</td>
+</tr>
+<tr>
+<td>Input</td>
+<td>Validazione Pydantic (email, prezzi &gt; 0, lunghezze,
+enumerazioni)</td>
+</tr>
+<tr>
+<td>Query</td>
+<td>ORM parametrizzato (niente SQL concatenato)</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Nota.</strong> <code>PRICELENS_SECRET_KEY</code> va impostata
+fissa in produzione: con la chiave casuale i token vengono invalidati ad
+ogni riavvio.</p>
+</blockquote>
+<h1 id="avvio-e-configurazione">14. Avvio e configurazione</h1>
+<h2 id="comandi">Comandi</h2>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> setup     <span class="co"># crea backend/.venv, installa pip + npm</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> serve     <span class="co"># build frontend + uvicorn su :8000</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a><span class="co"># oppure in sviluppo:</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> backend   <span class="co"># uvicorn :8000 con reload</span></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> frontend  <span class="co"># Vite :5173 (proxy /api → :8000)</span></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> test      <span class="co"># suite pytest</span></span></code></pre></div>
+<p>Al primo avvio vengono creati il database e i dati demo:</p>
+<pre><code>demo@pricelens.it / demo1234
+12 prodotti · 6 competitor · 60 giorni di storico</code></pre>
+<h2 id="variabili-dambiente">Variabili d’ambiente</h2>
+<table>
+<thead>
+<tr>
+<th>Variabile</th>
+<th>Default</th>
+<th>Significato</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PRICELENS_DATABASE_URL</code></td>
+<td><code>sqlite:///./pricelens.db</code></td>
+<td>Database</td>
+</tr>
+<tr>
+<td><code>PRICELENS_SECRET_KEY</code></td>
+<td>casuale</td>
+<td>Chiave firma JWT</td>
+</tr>
+<tr>
+<td><code>PRICELENS_TOKEN_EXPIRE_MINUTES</code></td>
+<td><code>10080</code></td>
+<td>Durata token</td>
+</tr>
+<tr>
+<td><code>PRICELENS_COLLECT_INTERVAL_SECONDS</code></td>
+<td><code>300</code></td>
+<td>Intervallo scheduler</td>
+</tr>
+<tr>
+<td><code>PRICELENS_SCHEDULER_ENABLED</code></td>
+<td><code>1</code></td>
+<td><code>0</code> per disattivare</td>
+</tr>
+</tbody>
+</table>
+<h1 id="test">15. Test</h1>
+<p>La suite (<code>backend/tests</code>, <strong>20 test</strong>) usa
+il <code>TestClient</code> di FastAPI e un database temporaneo isolato,
+quindi replica il comportamento reale dell’app.</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Area</th>
+<th>Cosa verifica</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Health</td>
+<td>endpoint pubblico</td>
+</tr>
+<tr>
+<td>Auth</td>
+<td>login, <code>/me</code>, password errata, 401 senza token,
+registrazione duplicata</td>
+</tr>
+<tr>
+<td>Isolamento</td>
+<td>un nuovo utente non vede i dati del demo</td>
+</tr>
+<tr>
+<td>Dashboard</td>
+<td>presenza KPI e sezioni</td>
+</tr>
+<tr>
+<td>Prodotti</td>
+<td>lista, dettaglio, storico, categorie, creazione/eliminazione, SKU
+duplicato</td>
+</tr>
+<tr>
+<td>Competitor</td>
+<td>lista e CRUD</td>
+</tr>
+<tr>
+<td>Alert</td>
+<td>lista, segna letto, segna tutti</td>
+</tr>
+<tr>
+<td>Repricing</td>
+<td>preview e applicazione</td>
+</tr>
+<tr>
+<td>Raccolta</td>
+<td><code>POST /api/collect</code></td>
+</tr>
+<tr>
+<td>Export</td>
+<td>CSV e XLSX</td>
+</tr>
+<tr>
+<td>Scheduler</td>
+<td>endpoint di stato</td>
+</tr>
+</tbody>
+</table>
+<p>Esecuzione: <code>make test</code> → <code>20 passed</code>.</p>
+<h1 id="note-operative">16. Note operative</h1>
+<h2 id="icloud-drive-e-disco-pieno">iCloud Drive e disco pieno</h2>
+<p>Se il progetto vive in una cartella sincronizzata con iCloud Drive e
+il disco è quasi pieno, macOS può rendere i file “dataless” (contenuto
+evicted). Sintomi: <code>Operation timed out</code> in lettura,
+venv/node_modules lentissimi.</p>
+<p>Soluzioni:</p>
+<ol type="1">
+<li>Liberare spazio su disco.</li>
+<li>Spostare il progetto fuori da <code>~/Documents</code> (es.
+<code>~/Projects/pricelens</code>).</li>
+<li>Tenere il virtualenv fuori da iCloud:
+<code>python3 -m venv /tmp/pricelens-venv</code>.</li>
+</ol>
+<h2 id="troubleshooting-rapido">Troubleshooting rapido</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Sintomo</th>
+<th>Causa probabile</th>
+<th>Rimedio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>401 su tutte le API</td>
+<td>token assente/scaduto</td>
+<td>rifare login</td>
+</tr>
+<tr>
+<td>Dashboard vuota su un nuovo utente</td>
+<td>corretto: i dati sono per-utente</td>
+<td>creare prodotti/competitor</td>
+</tr>
+<tr>
+<td><code>Attribute "app" not found</code> all’avvio</td>
+<td>file <code>main.py</code> illeggibile (eviction)</td>
+<td>riscrivere/ripristinare il file</td>
+</tr>
+<tr>
+<td>Porta 8000 occupata</td>
+<td>vecchio uvicorn</td>
+<td><code>pkill -f "uvicorn app.main"</code></td>
+</tr>
+</tbody>
+</table>
+<h1 id="glossario">17. Glossario</h1>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Termine</th>
+<th>Significato</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>MAP</strong></td>
+<td><em>Minimum Advertised Price</em> — prezzo minimo
+pubblicizzabile</td>
+</tr>
+<tr>
+<td><strong>MSRP</strong></td>
+<td><em>Manufacturer’s Suggested Retail Price</em> — prezzo
+consigliato</td>
+</tr>
+<tr>
+<td><strong>Floor</strong></td>
+<td>Prezzo minimo applicabile (MAP o costo + margine)</td>
+</tr>
+<tr>
+<td><strong>Ceiling</strong></td>
+<td>Prezzo massimo applicabile (MSRP o max competitor)</td>
+</tr>
+<tr>
+<td><strong>Price index</strong></td>
+<td>Indice 0–100 di competitività del prezzo</td>
+</tr>
+<tr>
+<td><strong>PricePoint</strong></td>
+<td>Singola rilevazione di prezzo di un competitor</td>
+</tr>
+<tr>
+<td><strong>Repricing</strong></td>
+<td>Adeguamento del prezzo sulla base dei dati di mercato</td>
+</tr>
+<tr>
+<td><strong>JWT</strong></td>
+<td>JSON Web Token, usato per l’autenticazione stateless</td>
+</tr>
+<tr>
+<td><strong>SPA</strong></td>
+<td>Single Page Application (frontend React)</td>
+</tr>
+</tbody>
+</table>
+<div class="finalnote">
+<p><strong>PriceLens</strong> — guida tecnica e funzionale. Clone
+migliorato di Minderest, ispirato alla metodologia REA.</p>
+</div>
+
+</body>
+</html>
